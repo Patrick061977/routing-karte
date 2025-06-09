@@ -1,0 +1,73 @@
+
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Routing mit Karte</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+    input, button { width: 100%; padding: 10px; margin-top: 5px; box-sizing: border-box; }
+    #map { height: 400px; margin-top: 10px; border: 1px solid #ccc; }
+    #output { margin-top: 15px; font-weight: bold; white-space: pre-line; }
+  </style>
+</head>
+<body>
+  <h3>📍 Routing mit Karte & Entfernung</h3>
+  <input id="start" type="text" placeholder="Startadresse (z. B. Heringsdorf)" />
+  <input id="ziel" type="text" placeholder="Zieladresse (z. B. Ahlbeck)" />
+  <button onclick="routeBerechnen()">Route anzeigen</button>
+  <div id="map"></div>
+  <div id="output"></div>
+
+  <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <script>
+    let map = L.map('map').setView([53.94, 14.18], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+    let routeLayer = null;
+
+    async function geocode(adresse) {
+      const res = await axios.get('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(adresse));
+      if (res.data.length > 0) {
+        const { lat, lon } = res.data[0];
+        return [parseFloat(lon), parseFloat(lat)];
+      }
+      return null;
+    }
+
+    async function routeBerechnen() {
+      const start = document.getElementById("start").value;
+      const ziel = document.getElementById("ziel").value;
+      const startCoords = await geocode(start);
+      const zielCoords = await geocode(ziel);
+
+      if (!startCoords || !zielCoords) {
+        document.getElementById("output").innerText = "❌ Adresse(n) nicht gefunden.";
+        return;
+      }
+
+      const orsKey = "5b3ce3597851110001cf6248b18dc5f1523d463b90f4dbd1b8e15d7f";
+      const response = await axios.post(
+        "https://api.openrouteservice.org/v2/directions/driving-car",
+        { coordinates: [startCoords, zielCoords] },
+        { headers: { Authorization: orsKey } }
+      );
+
+      const distKm = response.data.features[0].properties.summary.distance / 1000;
+      const zeitMin = response.data.features[0].properties.summary.duration / 60;
+
+      if (routeLayer) map.removeLayer(routeLayer);
+      routeLayer = L.geoJSON(response.data).addTo(map);
+      map.fitBounds(routeLayer.getBounds());
+
+      document.getElementById("output").innerText =
+        `🛣️ Entfernung: ${distKm.toFixed(2).replace('.', ',')} km
+⏱️ Dauer: ${zeitMin.toFixed(0)} Minuten`;
+    }
+  </script>
+</body>
+</html>
