@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Routing mit Karte – Benutzer-API</title>
+  <title>Routing mit Karte – Patch v4 (Regex Matching)</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
   <style>
     body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
@@ -14,9 +14,9 @@
   </style>
 </head>
 <body>
-  <h3>📍 Routing mit Karte & Entfernung (Eigener API-Key)</h3>
-  <input id="start" type="text" placeholder="Startadresse (z. B. Heringsdorf)" />
-  <input id="ziel" type="text" placeholder="Zieladresse (z. B. Ahlbeck)" />
+  <h3>📍 Routing mit Karte & Entfernung (Patch v4 – Regex Matching)</h3>
+  <input id="start" type="text" placeholder="Startadresse" />
+  <input id="ziel" type="text" placeholder="Zieladresse" />
   <button onclick="routeBerechnen()">Route anzeigen</button>
   <div id="map"></div>
   <div id="output"></div>
@@ -29,6 +29,23 @@
       attribution: '© OpenStreetMap'
     }).addTo(map);
     let routeLayer = null;
+
+    const ersatzRegeln = [
+      { pattern: /kaiserhof/i, adresse: "Kulmstraße 33, Heringsdorf" },
+      { pattern: /bahnhof.*heringsdorf/i, adresse: "Bahnhofstraße, 17424 Heringsdorf" },
+      { pattern: /bleichröder/i, adresse: "Delbrückstraße 14, Heringsdorf" },
+      { pattern: /(hotel )?das ahlbeck/i, adresse: "Dünenstraße 48, Ahlbeck" },
+      { pattern: /ahlbeck hotel/i, adresse: "Dünenstraße 48, Ahlbeck" }
+    ];
+
+    function ersetzeAdresse(eingabe) {
+      for (const regel of ersatzRegeln) {
+        if (regel.pattern.test(eingabe)) {
+          return regel.adresse;
+        }
+      }
+      return eingabe;
+    }
 
     async function geocode(adresse) {
       try {
@@ -44,13 +61,13 @@
     }
 
     async function routeBerechnen() {
-      const start = document.getElementById("start").value;
-      const ziel = document.getElementById("ziel").value;
+      const eingabeStart = ersetzeAdresse(document.getElementById("start").value.toLowerCase());
+      const eingabeZiel = ersetzeAdresse(document.getElementById("ziel").value.toLowerCase());
       const output = document.getElementById("output");
 
       output.innerText = "⏳ Berechne Route...";
-      const startCoords = await geocode(start);
-      const zielCoords = await geocode(ziel);
+      const startCoords = await geocode(eingabeStart);
+      const zielCoords = await geocode(eingabeZiel);
 
       if (!startCoords || !zielCoords) {
         output.innerText = "❌ Start oder Ziel konnte nicht gefunden werden.";
