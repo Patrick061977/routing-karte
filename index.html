@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Funk Taxi Heringsdorf - Buchhaltungssoftware</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .datev-blue { background-color: #003366; }
+        .datev-border { border-color: #003366; }
+        .status-offen { background-color: #FEE2E2; color: #991B1B; }
+        .status-bearbeitet { background-color: #FEF3C7; color: #92400E; }
+        .status-gebucht { background-color: #D1FAE5; color: #065F46; }
+        .priority-high { border-left: 4px solid #DC2626; }
+        .priority-medium { border-left: 4px solid #F59E0B; }
+        .priority-low { border-left: 4px solid #10B981; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Firebase Konfiguration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBBwIgf8o8q4NqzryHNlbPOeZdvjLw3H3A",
+            authDomain: "buchhaltung-d8bd8.firebaseapp.com",
+            projectId: "buchhaltung-d8bd8",
+            storageBucket: "buchhaltung-d8bd8.firebasestorage.app",
+            messagingSenderId: "500293948160",
+            appId: "1:500293948160:web:099bb0c05d7cfcce8b99e5"
+        };
+
+        // Firebase initialisieren
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.firestore();
+        const COLLECTION_NAME = 'dokumente';
+
+        // DATEV SKR03 Kontenrahmen (Auszug für Taxiunternehmen)
+        const KONTENRAHMEN = {
+            einnahmen: [
+                { konto: '8400', bezeichnung: 'Erlöse 19% USt (Taxifahrten)' },
+                { konto: '8405', bezeichnung: 'Erlöse 7% USt' },
+                { konto: '8300', bezeichnung: 'Privatentnahmen' },
+            ],
+            ausgaben: [
+                { konto: '4530', bezeichnung: 'Treibstoff' },
+                { konto: '4540', bezeichnung: 'Kfz-Versicherungen' },
+                { konto: '4550', bezeichnung: 'Kfz-Reparaturen' },
+                { konto: '4520', bezeichnung: 'Kfz-Steuer' },
+                { konto: '6300', bezeichnung: 'Abschreibungen Fahrzeuge' },
+                { konto: '4940', bezeichnung: 'Sonstige betriebliche Aufwendungen' },
+                { konto: '4110', bezeichnung: 'Miete' },
+                { konto: '4920', bezeichnung: 'Telefon/Internet' },
+                { konto: '4610', bezeichnung: 'Versicherungen' },
+            ]
+        };
+
+        const DOKUMENTTYPEN = [
+            { id: 'eingangsrechnung', name: 'Eingangsrechnung', icon: '📄' },
+            { id: 'ausgangsrechnung', name: 'Ausgangsrechnung', icon: '📝' },
+            { id: 'bankbeleg', name: 'Bankbeleg', icon: '🏦' },
+            { id: 'quittung', name: 'Quittung', icon: '🧾' },
+            { id: 'tankbeleg', name: 'Tankbeleg', icon: '⛽' },
+            { id: 'sonstiges', name: 'Sonstiges', icon: '📋' },
+        ];
+
+        function BuchhaltungApp() {
+            const [activeTab, setActiveTab] = useState('dashboard');
+            const [dokumente, setDokumente] = useState([]);
+            const [filter, setFilter] = useState('alle');
+            const [showUpload, setShowUpload] = useState(false);
+            const [loading, setLoading] = useState(true);
+
+            // Daten aus Firebase laden
+            useEffect(() => {
+                loadData();
+            }, []);
+
+            async function loadData() {
+                try {
+                    setLoading(true);
+                    const snapshot = await db.collection(COLLECTION_NAME).get();
+                    const data = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    setDokumente(data);
+                } catch (error) {
+                    console.error('Fehler beim Laden:', error);
+                    alert('Fehler beim Laden der Daten. Bitte Seite neu laden.');
+                } finally {
+                    setLoading(false);
+                }
+            }
+
+            async function addDokument(dokument) {
+                try {
+                    const newDok = {
+                        ...dokument,
+                        erstelltAm: new Date().toISOString(),
+                        status: 'offen'
+                    };
+                    const docRef = await db.collection(COLLECTION_NAME).add(newDok);
+                    setDokumente([...dokumente, { id: docRef.id, ...newDok }]);
+                    setShowUpload(false);
+                } catch (error) {
+                    console.error('Fehler beim Speichern:', error);
+                    alert('Fehler beim Speichern des Dokuments');
+                }
+            }
+
+            async function updateDokumentStatus(id, newStatus) {
+                try {
+                    await db.collection(COLLECTION_NAME).doc(id).update({ status: newStatus });
+                    const updated = dokumente.map(d => 
+                        d.id === id ? { ...d, status: newStatus } : d
+                    );
+                    setDokumente(updated);
+                } catch (error) {
+                    console.error('Fehler beim Aktualisieren:', error);
+                    alert('Fehler beim Aktualisieren des Status');
+                }
+            }
+
+            async function deleteDokument(id) {
+                if (confirm('Dokument wirklich löschen?')) {
+                    try {
+                        await db.collection(COLLECTION_NAME).doc(id).delete();
+                        setDokumente(dokumente.filter(d => d.id !== id));
+                    } catch (error) {
+                        console.error('Fehler beim Löschen:', error);
+                        alert('Fehler beim Löschen des Dokuments');
+                    }
+                }
+            }
+
+            async function updateDokument(id, data) {
+                try {
+                    await db.collection(COLLECTION_NAME).doc(id).update(data);
+                    const updated = dokumente.map(d => d.id === id ? { ...d, ...data } : d);
+                    setDokumente(updated);
+                } catch (error) {
+                    console.error('Fehler beim Aktualisieren:', error);
+                    alert('Fehler beim Aktualisieren des Dokuments');
+                }
+            }
+
+            if (loading) {
+                return (
+                    <div className="min-h-screen flex items-center justify-center bg-gray-50">
+                        <div className="text-center">
+                            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                            <p className="text-xl text-gray-600">Lade Daten aus Firebase...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Dashboard Statistiken
+            const stats = {
+                gesamt: dokumente.length,
+                offen: dokumente.filter(d => d.status === 'offen').length,
+                bearbeitet: dokumente.filter(d => d.status === 'bearbeitet').length,
+                gebucht: dokumente.filter(d => d.status === 'gebucht').length,
+                hochprio: dokumente.filter(d => d.prioritaet === 'hoch').length
+            };
+
+            // Monatsstatistiken
+            const aktuellerMonat = new Date().getMonth();
+            const aktuellesJahr = new Date().getFullYear();
+            const monatsDokumente = dokumente.filter(d => {
+                const datum = new Date(d.datum);
+                return datum.getMonth() === aktuellerMonat && datum.getFullYear() === aktuellesJahr;
+            });
+
+            const monatsEinnahmen = monatsDokumente
+                .filter(d => d.typ === 'ausgangsrechnung')
+                .reduce((sum, d) => sum + (parseFloat(d.betrag) || 0), 0);
+
+            const monatsAusgaben = monatsDokumente
+                .filter(d => d.typ === 'eingangsrechnung' || d.typ === 'tankbeleg' || d.typ === 'quittung')
+                .reduce((sum, d) => sum + (parseFloat(d.betrag) || 0), 0);
+
+            return (
+                <div className="min-h-screen">
+                    {/* Header */}
+                    <header className="datev-blue text-white shadow-lg">
+                        <div className="container mx-auto px-6 py-4">
+                            <div className="flex justify-between items-center">
+                                <div>
+                                    <h1 className="text-2xl font-bold">🚕 Funk Taxi Heringsdorf</h1>
+                                    <p className="text-blue-200 text-sm">Buchhaltungssoftware DATEV-Style</p>
+                                </div>
+                                <div className="text-right">
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className="bg-green-500 w-2 h-2 rounded-full animate-pulse"></span>
+                                        <span className="text-xs text-green-200">Firebase Cloud verbunden</span>
+                                    </div>
+                                    <p className="text-sm text-blue-200">Amselring 10, 17424 Heringsdorf</p>
+                                    <p className="text-sm text-blue-200">{new Date().toLocaleDateString('de-DE', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</p>
+                                </div>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Navigation */}
+                    <nav className="bg-white shadow-md border-b-2 datev-border">
+                        <div className="container mx-auto px-6">
+                            <div className="flex space-x-1">
+                                {[
+                                    { id: 'dashboard', name: 'Dashboard', icon: '📊' },
+                                    { id: 'dokumente', name: 'Dokumente', icon: '📁' },
+                                    { id: 'kontierung', name: 'Kontierung', icon: '🔢' },
+                                    { id: 'auswertungen', name: 'Auswertungen', icon: '📈' },
+                                ].map(tab => (
+                                    <button
+                                        key={tab.id}
+                                        onClick={() => setActiveTab(tab.id)}
+                                        className={`px-6 py-4 font-medium transition-colors ${
+                                            activeTab === tab.id
+                                                ? 'datev-blue text-white'
+                                                : 'text-gray-600 hover:bg-gray-100'
+                                        }`}
+                                    >
+                                        <span className="mr-2">{tab.icon}</span>
+                                        {tab.name}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    </nav>
+
+                    {/* Main Content */}
+                    <main className="container mx-auto px-6 py-8">
+                        {activeTab === 'dashboard' && (
+                            <Dashboard stats={stats} monatsEinnahmen={monatsEinnahmen} monatsAusgaben={monatsAusgaben} dokumente={dokumente} />
+                        )}
+                        
+                        {activeTab === 'dokumente' && (
+                            <DokumenteView 
+                                dokumente={dokumente} 
+                                filter={filter} 
+                                setFilter={setFilter}
+                                updateStatus={updateDokumentStatus}
+                                deleteDokument={deleteDokument}
+                                setShowUpload={setShowUpload}
+                            />
+                        )}
+                        
+                        {activeTab === 'kontierung' && (
+                            <KontierungView dokumente={dokumente} updateDokument={updateDokument} />
+                        )}
+                        
+                        {activeTab === 'auswertungen' && (
+                            <AuswertungenView dokumente={dokumente} />
+                        )}
+                    </main>
+
+                    {/* Upload Modal */}
+                    {showUpload && (
+                        <UploadModal onClose={() => setShowUpload(false)} onSave={addDokument} />
+                    )}
+                </div>
+            );
+        }
+
+        function Dashboard({ stats, monatsEinnahmen, monatsAusgaben, dokumente }) {
+            const hochprioDokumente = dokumente
+                .filter(d => d.prioritaet === 'hoch' && d.status !== 'gebucht')
+                .sort((a, b) => new Date(a.faelligAm || a.datum) - new Date(b.faelligAm || b.datum))
+                .slice(0, 5);
+
+            return (
+                <div className="space-y-6">
+                    <h2 className="text-3xl font-bold text-gray-800">Dashboard</h2>
+                    
+                    {/* Status Cards */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+                        <StatCard title="Gesamt" value={stats.gesamt} icon="📋" color="bg-blue-500" />
+                        <StatCard title="Offen" value={stats.offen} icon="⏳" color="bg-red-500" />
+                        <StatCard title="In Bearbeitung" value={stats.bearbeitet} icon="✏️" color="bg-yellow-500" />
+                        <StatCard title="Gebucht" value={stats.gebucht} icon="✅" color="bg-green-500" />
+                        <StatCard title="Hochpriorität" value={stats.hochprio} icon="🔥" color="bg-orange-500" />
+                    </div>
+
+                    {/* Monatsübersicht */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-white rounded-lg shadow-md p-6">
+                            <h3 className="text-lg font-semibold text-gray-700 mb-2">💰 Einnahmen (aktueller Monat)</h3>
+                            <p className="text-3xl font-bold text-green-600">{monatsEinnahmen.toFixed(2)} €</p>
+                        </div>
+                        <div className="bg-white rounded-lg shadow-md p-6">
+                            <h3 className="text-lg font-semibold text-gray-700 mb-2">💸 Ausgaben (aktueller Monat)</h3>
+                            <p className="text-3xl font-bold text-red-600">{monatsAusgaben.toFixed(2)} €</p>
+                        </div>
+                        <div className="bg-white rounded-lg shadow-md p-6">
+                            <h3 className="text-lg font-semibold text-gray-700 mb-2">📊 Gewinn (aktueller Monat)</h3>
+                            <p className={`text-3xl font-bold ${monatsEinnahmen - monatsAusgaben >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {(monatsEinnahmen - monatsAusgaben).toFixed(2)} €
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Hochpriorität Dokumente */}
+                    {hochprioDokumente.length > 0 && (
+                        <div className="bg-white rounded-lg shadow-md p-6">
+                            <h3 className="text-xl font-bold text-gray-800 mb-4">🔥 Dringende Dokumente</h3>
+                            <div className="space-y-3">
+                                {hochprioDokumente.map(dok => (
+                                    <div key={dok.id} className="flex justify-between items-center p-3 bg-red-50 border-l-4 border-red-500 rounded">
+                                        <div>
+                                            <p className="font-semibold">{dok.beschreibung}</p>
+                                            <p className="text-sm text-gray-600">
+                                                {DOKUMENTTYPEN.find(t => t.id === dok.typ)?.name} • {new Date(dok.datum).toLocaleDateString('de-DE')}
+                                                {dok.faelligAm && ` • Fällig: ${new Date(dok.faelligAm).toLocaleDateString('de-DE')}`}
+                                            </p>
+                                        </div>
+                                        <span className={`px-3 py-1 rounded text-sm font-medium status-${dok.status}`}>
+                                            {dok.status}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function StatCard({ title, value, icon, color }) {
+            return (
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <div className="flex justify-between items-center">
+                        <div>
+                            <p className="text-gray-600 text-sm font-medium">{title}</p>
+                            <p className="text-3xl font-bold text-gray-800 mt-1">{value}</p>
+                        </div>
+                        <div className={`${color} w-14 h-14 rounded-full flex items-center justify-center text-2xl`}>
+                            {icon}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function DokumenteView({ dokumente, filter, setFilter, updateStatus, deleteDokument, setShowUpload }) {
+            const filtered = filter === 'alle' 
+                ? dokumente 
+                : dokumente.filter(d => d.status === filter);
+
+            const sortiert = [...filtered].sort((a, b) => {
+                // Erst nach Priorität
+                const prioOrder = { hoch: 0, mittel: 1, niedrig: 2 };
+                if (prioOrder[a.prioritaet] !== prioOrder[b.prioritaet]) {
+                    return prioOrder[a.prioritaet] - prioOrder[b.prioritaet];
+                }
+                // Dann nach Datum
+                return new Date(b.datum) - new Date(a.datum);
+            });
+
+            return (
+                <div className="space-y-6">
+                    <div className="flex justify-between items-center">
+                        <h2 className="text-3xl font-bold text-gray-800">Dokumentenverwaltung</h2>
+                        <button
+                            onClick={() => setShowUpload(true)}
+                            className="datev-blue text-white px-6 py-3 rounded-lg font-semibold hover:bg-blue-900 transition-colors"
+                        >
+                            ➕ Dokument hinzufügen
+                        </button>
+                    </div>
+
+                    {/* Filter */}
+                    <div className="bg-white rounded-lg shadow-md p-4">
+                        <div className="flex flex-wrap gap-2">
+                            {['alle', 'offen', 'bearbeitet', 'gebucht'].map(status => (
+                                <button
+                                    key={status}
+                                    onClick={() => setFilter(status)}
+                                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                                        filter === status
+                                            ? 'datev-blue text-white'
+                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                    }`}
+                                >
+                                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                                    {status !== 'alle' && ` (${dokumente.filter(d => d.status === status).length})`}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Dokumente Liste */}
+                    <div className="space-y-3">
+                        {sortiert.length === 0 ? (
+                            <div className="bg-white rounded-lg shadow-md p-12 text-center">
+                                <p className="text-gray-500 text-lg">Keine Dokumente vorhanden</p>
+                                <button
+                                    onClick={() => setShowUpload(true)}
+                                    className="mt-4 datev-blue text-white px-6 py-2 rounded-lg hover:bg-blue-900"
+                                >
+                                    Erstes Dokument hinzufügen
+                                </button>
+                            </div>
+                        ) : (
+                            sortiert.map(dok => (
+                                <DokumentCard 
+                                    key={dok.id} 
+                                    dokument={dok} 
+                                    updateStatus={updateStatus}
+                                    deleteDokument={deleteDokument}
+                                />
+                            ))
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function DokumentCard({ dokument, updateStatus, deleteDokument }) {
+            const [expanded, setExpanded] = useState(false);
+            const typInfo = DOKUMENTTYPEN.find(t => t.id === dokument.typ);
+            const prioClass = `priority-${dokument.prioritaet === 'hoch' ? 'high' : dokument.prioritaet === 'mittel' ? 'medium' : 'low'}`;
+
+            return (
+                <div className={`bg-white rounded-lg shadow-md ${prioClass} overflow-hidden`}>
+                    <div className="p-4">
+                        <div className="flex justify-between items-start">
+                            <div className="flex-1">
+                                <div className="flex items-center gap-3 mb-2">
+                                    <span className="text-2xl">{typInfo?.icon}</span>
+                                    <div>
+                                        <h3 className="font-bold text-lg text-gray-800">{dokument.beschreibung}</h3>
+                                        <p className="text-sm text-gray-600">
+                                            {typInfo?.name} • {new Date(dokument.datum).toLocaleDateString('de-DE')}
+                                        </p>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-4 mt-2">
+                                    <span className="font-bold text-lg text-gray-800">{parseFloat(dokument.betrag).toFixed(2)} €</span>
+                                    {dokument.faelligAm && (
+                                        <span className="text-sm text-gray-600">
+                                            Fällig: {new Date(dokument.faelligAm).toLocaleDateString('de-DE')}
+                                        </span>
+                                    )}
+                                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                                        dokument.prioritaet === 'hoch' ? 'bg-red-100 text-red-700' :
+                                        dokument.prioritaet === 'mittel' ? 'bg-yellow-100 text-yellow-700' :
+                                        'bg-green-100 text-green-700'
+                                    }`}>
+                                        {dokument.prioritaet}
+                                    </span>
+                                </div>
+                            </div>
+
+                            <div className="flex flex-col gap-2">
+                                <select
+                                    value={dokument.status}
+                                    onChange={(e) => updateStatus(dokument.id, e.target.value)}
+                                    className={`px-3 py-1 rounded font-medium text-sm cursor-pointer status-${dokument.status}`}
+                                >
+                                    <option value="offen">Offen</option>
+                                    <option value="bearbeitet">Bearbeitet</option>
+                                    <option value="gebucht">Gebucht</option>
+                                </select>
+                                
+                                <button
+                                    onClick={() => setExpanded(!expanded)}
+                                    className="text-blue-600 hover:text-blue-800 text-sm"
+                                >
+                                    {expanded ? '▲ Weniger' : '▼ Details'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {expanded && (
+                            <div className="mt-4 pt-4 border-t space-y-2">
+                                {dokument.lieferant && <p className="text-sm"><strong>Lieferant:</strong> {dokument.lieferant}</p>}
+                                {dokument.belegnummer && <p className="text-sm"><strong>Belegnummer:</strong> {dokument.belegnummer}</p>}
+                                {dokument.konto && <p className="text-sm"><strong>Konto:</strong> {dokument.konto} - {KONTENRAHMEN.ausgaben.find(k => k.konto === dokument.konto)?.bezeichnung || KONTENRAHMEN.einnahmen.find(k => k.konto === dokument.konto)?.bezeichnung}</p>}
+                                {dokument.notizen && <p className="text-sm"><strong>Notizen:</strong> {dokument.notizen}</p>}
+                                
+                                <div className="flex gap-2 mt-3">
+                                    <button
+                                        onClick={() => deleteDokument(dokument.id)}
+                                        className="px-4 py-2 bg-red-500 text-white rounded hover:bg-red-600 text-sm"
+                                    >
+                                        🗑️ Löschen
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function KontierungView({ dokumente, updateDokument }) {
+            const ungebuchte = dokumente.filter(d => d.status !== 'gebucht' && !d.konto);
+
+            return (
+                <div className="space-y-6">
+                    <h2 className="text-3xl font-bold text-gray-800">DATEV-Kontierung</h2>
+                    
+                    <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4">
+                        <p className="text-sm text-yellow-800">
+                            💡 <strong>Hinweis:</strong> Ordnen Sie jedem Dokument das passende DATEV-Konto zu (SKR03).
+                        </p>
+                    </div>
+
+                    {ungebuchte.length === 0 ? (
+                        <div className="bg-white rounded-lg shadow-md p-12 text-center">
+                            <p className="text-gray-500 text-lg">✅ Alle Dokumente sind kontiert!</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {ungebuchte.map(dok => (
+                                <KontierungCard key={dok.id} dokument={dok} updateDokument={updateDokument} />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        function KontierungCard({ dokument, updateDokument }) {
+            const [konto, setKonto] = useState(dokument.konto || '');
+            const istEinnahme = dokument.typ === 'ausgangsrechnung';
+            const konten = istEinnahme ? KONTENRAHMEN.einnahmen : KONTENRAHMEN.ausgaben;
+
+            function speichern() {
+                if (!konto) {
+                    alert('Bitte wählen Sie ein Konto aus');
+                    return;
+                }
+                updateDokument(dokument.id, { konto, status: 'bearbeitet' });
+            }
+
+            return (
+                <div className="bg-white rounded-lg shadow-md p-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <h3 className="font-bold text-lg mb-2">{dokument.beschreibung}</h3>
+                            <p className="text-sm text-gray-600 mb-1">Typ: {DOKUMENTTYPEN.find(t => t.id === dokument.typ)?.name}</p>
+                            <p className="text-sm text-gray-600 mb-1">Datum: {new Date(dokument.datum).toLocaleDateString('de-DE')}</p>
+                            <p className="font-bold text-xl mt-2">{parseFloat(dokument.betrag).toFixed(2)} €</p>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                DATEV-Konto zuordnen:
+                            </label>
+                            <select
+                                value={konto}
+                                onChange={(e) => setKonto(e.target.value)}
+                                className="w-full p-2 border border-gray-300 rounded mb-3"
+                            >
+                                <option value="">-- Konto wählen --</option>
+                                {konten.map(k => (
+                                    <option key={k.konto} value={k.konto}>
+                                        {k.konto} - {k.bezeichnung}
+                                    </option>
+                                ))}
+                            </select>
+
+                            <button
+                                onClick={speichern}
+                                className="w-full datev-blue text-white py-2 rounded hover:bg-blue-900"
+                            >
+                                💾 Kontierung speichern
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function AuswertungenView({ dokumente }) {
+            const [zeitraum, setZeitraum] = useState('monat');
+            
+            const jetzt = new Date();
+            let startDatum, endDatum;
+            
+            if (zeitraum === 'monat') {
+                startDatum = new Date(jetzt.getFullYear(), jetzt.getMonth(), 1);
+                endDatum = new Date(jetzt.getFullYear(), jetzt.getMonth() + 1, 0);
+            } else if (zeitraum === 'quartal') {
+                const quartal = Math.floor(jetzt.getMonth() / 3);
+                startDatum = new Date(jetzt.getFullYear(), quartal * 3, 1);
+                endDatum = new Date(jetzt.getFullYear(), (quartal + 1) * 3, 0);
+            } else {
+                startDatum = new Date(jetzt.getFullYear(), 0, 1);
+                endDatum = new Date(jetzt.getFullYear(), 11, 31);
+            }
+
+            const zeitraumDokumente = dokumente.filter(d => {
+                const datum = new Date(d.datum);
+                return datum >= startDatum && datum <= endDatum;
+            });
+
+            const einnahmen = zeitraumDokumente
+                .filter(d => d.typ === 'ausgangsrechnung')
+                .reduce((sum, d) => sum + parseFloat(d.betrag || 0), 0);
+
+            const ausgaben = zeitraumDokumente
+                .filter(d => d.typ !== 'ausgangsrechnung')
+                .reduce((sum, d) => sum + parseFloat(d.betrag || 0), 0);
+
+            // Ausgaben nach Kategorie
+            const kategorien = {};
+            zeitraumDokumente
+                .filter(d => d.typ !== 'ausgangsrechnung' && d.konto)
+                .forEach(d => {
+                    const kontoInfo = KONTENRAHMEN.ausgaben.find(k => k.konto === d.konto);
+                    const bezeichnung = kontoInfo?.bezeichnung || 'Sonstiges';
+                    kategorien[bezeichnung] = (kategorien[bezeichnung] || 0) + parseFloat(d.betrag || 0);
+                });
+
+            return (
+                <div className="space-y-6">
+                    <div className="flex justify-between items-center">
+                        <h2 className="text-3xl font-bold text-gray-800">Auswertungen & Statistiken</h2>
+                        
+                        <select
+                            value={zeitraum}
+                            onChange={(e) => setZeitraum(e.target.value)}
+                            className="px-4 py-2 border border-gray-300 rounded"
+                        >
+                            <option value="monat">Aktueller Monat</option>
+                            <option value="quartal">Aktuelles Quartal</option>
+                            <option value="jahr">Aktuelles Jahr</option>
+                        </select>
+                    </div>
+
+                    {/* Übersicht */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <div className="bg-white rounded-lg shadow-md p-6">
+                            <h3 className="text-lg font-semibold text-gray-700 mb-2">💰 Einnahmen</h3>
+                            <p className="text-3xl font-bold text-green-600">{einnahmen.toFixed(2)} €</p>
+                        </div>
+                        <div className="bg-white rounded-lg shadow-md p-6">
+                            <h3 className="text-lg font-semibold text-gray-700 mb-2">💸 Ausgaben</h3>
+                            <p className="text-3xl font-bold text-red-600">{ausgaben.toFixed(2)} €</p>
+                        </div>
+                        <div className="bg-white rounded-lg shadow-md p-6">
+                            <h3 className="text-lg font-semibold text-gray-700 mb-2">📊 Gewinn/Verlust</h3>
+                            <p className={`text-3xl font-bold ${einnahmen - ausgaben >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                                {(einnahmen - ausgaben).toFixed(2)} €
+                            </p>
+                        </div>
+                    </div>
+
+                    {/* Ausgaben nach Kategorie */}
+                    <div className="bg-white rounded-lg shadow-md p-6">
+                        <h3 className="text-xl font-bold text-gray-800 mb-4">Ausgaben nach Kategorie</h3>
+                        <div className="space-y-3">
+                            {Object.entries(kategorien)
+                                .sort((a, b) => b[1] - a[1])
+                                .map(([kategorie, betrag]) => {
+                                    const prozent = ausgaben > 0 ? (betrag / ausgaben * 100) : 0;
+                                    return (
+                                        <div key={kategorie}>
+                                            <div className="flex justify-between text-sm mb-1">
+                                                <span className="font-medium">{kategorie}</span>
+                                                <span className="text-gray-600">{betrag.toFixed(2)} € ({prozent.toFixed(1)}%)</span>
+                                            </div>
+                                            <div className="w-full bg-gray-200 rounded-full h-2">
+                                                <div 
+                                                    className="bg-blue-600 h-2 rounded-full transition-all"
+                                                    style={{ width: `${prozent}%` }}
+                                                />
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                        </div>
+                    </div>
+
+                    {/* DATEV Export */}
+                    <div className="bg-white rounded-lg shadow-md p-6">
+                        <h3 className="text-xl font-bold text-gray-800 mb-4">📤 DATEV-Export</h3>
+                        <p className="text-gray-600 mb-4">Exportieren Sie Ihre Daten für den Import in DATEV oder zur Weitergabe an Ihren Steuerberater.</p>
+                        <button
+                            onClick={() => exportDATEV(zeitraumDokumente)}
+                            className="datev-blue text-white px-6 py-3 rounded-lg hover:bg-blue-900"
+                        >
+                            📥 CSV-Export (DATEV-Format)
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        function exportDATEV(dokumente) {
+            const header = 'Datum;Belegnummer;Beschreibung;Konto;Betrag;Umsatzsteuer;Status\n';
+            const rows = dokumente
+                .filter(d => d.konto)
+                .map(d => {
+                    const datum = new Date(d.datum).toLocaleDateString('de-DE');
+                    return `${datum};${d.belegnummer || ''};${d.beschreibung};${d.konto};${d.betrag};${d.ustSatz || 0};${d.status}`;
+                })
+                .join('\n');
+            
+            const csv = header + rows;
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `DATEV-Export-${new Date().toISOString().split('T')[0]}.csv`;
+            link.click();
+        }
+
+        function UploadModal({ onClose, onSave }) {
+            const [formData, setFormData] = useState({
+                typ: 'eingangsrechnung',
+                beschreibung: '',
+                betrag: '',
+                datum: new Date().toISOString().split('T')[0],
+                faelligAm: '',
+                lieferant: '',
+                belegnummer: '',
+                prioritaet: 'mittel',
+                ustSatz: '19',
+                notizen: ''
+            });
+
+            function handleSubmit(e) {
+                e.preventDefault();
+                if (!formData.beschreibung || !formData.betrag) {
+                    alert('Bitte füllen Sie mindestens Beschreibung und Betrag aus');
+                    return;
+                }
+                onSave(formData);
+            }
+
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+                        <div className="datev-blue text-white p-6 rounded-t-lg">
+                            <h2 className="text-2xl font-bold">Neues Dokument erfassen</h2>
+                        </div>
+
+                        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Dokumenttyp *</label>
+                                    <select
+                                        value={formData.typ}
+                                        onChange={(e) => setFormData({...formData, typ: e.target.value})}
+                                        className="w-full p-2 border border-gray-300 rounded"
+                                        required
+                                    >
+                                        {DOKUMENTTYPEN.map(t => (
+                                            <option key={t.id} value={t.id}>{t.icon} {t.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Priorität *</label>
+                                    <select
+                                        value={formData.prioritaet}
+                                        onChange={(e) => setFormData({...formData, prioritaet: e.target.value})}
+                                        className="w-full p-2 border border-gray-300 rounded"
+                                    >
+                                        <option value="niedrig">🟢 Niedrig</option>
+                                        <option value="mittel">🟡 Mittel</option>
+                                        <option value="hoch">🔴 Hoch</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Beschreibung *</label>
+                                <input
+                                    type="text"
+                                    value={formData.beschreibung}
+                                    onChange={(e) => setFormData({...formData, beschreibung: e.target.value})}
+                                    className="w-full p-2 border border-gray-300 rounded"
+                                    placeholder="z.B. Tankrechnung Shell"
+                                    required
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Betrag (€) *</label>
+                                    <input
+                                        type="number"
+                                        step="0.01"
+                                        value={formData.betrag}
+                                        onChange={(e) => setFormData({...formData, betrag: e.target.value})}
+                                        className="w-full p-2 border border-gray-300 rounded"
+                                        placeholder="0.00"
+                                        required
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">USt-Satz (%)</label>
+                                    <select
+                                        value={formData.ustSatz}
+                                        onChange={(e) => setFormData({...formData, ustSatz: e.target.value})}
+                                        className="w-full p-2 border border-gray-300 rounded"
+                                    >
+                                        <option value="0">0%</option>
+                                        <option value="7">7%</option>
+                                        <option value="19">19%</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Belegdatum *</label>
+                                    <input
+                                        type="date"
+                                        value={formData.datum}
+                                        onChange={(e) => setFormData({...formData, datum: e.target.value})}
+                                        className="w-full p-2 border border-gray-300 rounded"
+                                        required
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Fällig am</label>
+                                    <input
+                                        type="date"
+                                        value={formData.faelligAm}
+                                        onChange={(e) => setFormData({...formData, faelligAm: e.target.value})}
+                                        className="w-full p-2 border border-gray-300 rounded"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Lieferant/Kunde</label>
+                                    <input
+                                        type="text"
+                                        value={formData.lieferant}
+                                        onChange={(e) => setFormData({...formData, lieferant: e.target.value})}
+                                        className="w-full p-2 border border-gray-300 rounded"
+                                        placeholder="z.B. Shell Tankstelle"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 mb-1">Belegnummer</label>
+                                    <input
+                                        type="text"
+                                        value={formData.belegnummer}
+                                        onChange={(e) => setFormData({...formData, belegnummer: e.target.value})}
+                                        className="w-full p-2 border border-gray-300 rounded"
+                                        placeholder="RE-2025-001"
+                                    />
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Notizen</label>
+                                <textarea
+                                    value={formData.notizen}
+                                    onChange={(e) => setFormData({...formData, notizen: e.target.value})}
+                                    className="w-full p-2 border border-gray-300 rounded"
+                                    rows="3"
+                                    placeholder="Zusätzliche Informationen..."
+                                />
+                            </div>
+
+                            <div className="flex gap-3 pt-4">
+                                <button
+                                    type="submit"
+                                    className="flex-1 datev-blue text-white py-3 rounded-lg font-semibold hover:bg-blue-900"
+                                >
+                                    💾 Speichern
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={onClose}
+                                    className="flex-1 bg-gray-200 text-gray-800 py-3 rounded-lg font-semibold hover:bg-gray-300"
+                                >
+                                    Abbrechen
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        }
+
+        ReactDOM.render(<BuchhaltungApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
