@@ -103,7 +103,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "3.3.0 - Smart Kategorie-Vorschläge";
+        const VERSION = "3.3.1 - Smart Kategorie-Vorschläge";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dashboard');
@@ -164,7 +164,9 @@
                     }));
                     setKiRegeln(regeln);
                 } catch (error) {
-                    console.error('Fehler beim Laden der KI-Regeln:', error);
+                    console.warn('KI-Regeln konnten nicht geladen werden (Firebase Permissions fehlen):', error.message);
+                    // Nicht kritisch - weiter ohne KI-Regeln
+                    setKiRegeln([]);
                 }
             }
             
@@ -842,6 +844,8 @@
                                 uploadProgress={uploadProgress}
                                 selectedDokument={selectedDokument}
                                 setSelectedDokument={setSelectedDokument}
+                                kategorieVorschlag={kategorieVorschlag}
+                                setKategorieVorschlag={setKategorieVorschlag}
                             />
                         )}
                         
@@ -1048,7 +1052,7 @@
             );
         }
 
-        function DokumenteView({ dokumente, ordner, selectedOrdner, setSelectedOrdner, searchTerm, setSearchTerm, statusFilter, setStatusFilter, sortBy, setSortBy, sortOrder, setSortOrder, updateStatus, updateDokument, deleteDokument, handleFileUpload, uploading, uploadProgress, selectedDokument, setSelectedDokument }) {
+        function DokumenteView({ dokumente, ordner, selectedOrdner, setSelectedOrdner, searchTerm, setSearchTerm, statusFilter, setStatusFilter, sortBy, setSortBy, sortOrder, setSortOrder, updateStatus, updateDokument, deleteDokument, handleFileUpload, uploading, uploadProgress, selectedDokument, setSelectedDokument, kategorieVorschlag, setKategorieVorschlag }) {
             const filteredDokumente = dokumente.filter(dok => {
                 const matchOrdner = selectedOrdner === 'alle' || dok.absender === selectedOrdner || dok.lieferant === selectedOrdner;
                 const matchSearch = searchTerm === '' || 
