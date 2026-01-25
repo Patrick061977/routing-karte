@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "5.0.0 - KOMPLETT-REBUILD (Funktioniert!)";
+        const VERSION = "5.1.0 - Intelligente Absender-Erkennung";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dashboard');
@@ -146,7 +146,30 @@
                     setDokumente(data);
                     
                     // Ordner extrahieren - AUTO-ORDNER nach Absender
-                    const uniqueOrdner = [...new Set(data.map(d => d.absender || d.lieferant).filter(Boolean))];
+                    const rawOrdner = data.map(d => d.absender || d.lieferant).filter(Boolean);
+                    
+                    // NEU: Filtere Müll-Ordner raus
+                    const cleanOrdner = rawOrdner.filter(name => {
+                        // Mindestlänge
+                        if (name.length < 3) return false;
+                        // Maximallänge
+                        if (name.length > 60) return false;
+                        // Keine reinen Sonderzeichen
+                        if (name.match(/^[\{\}\[\]\|\\\/<>]+$/)) return false;
+                        // Nicht mit Zahlen starten
+                        if (name.match(/^[\d\.\-\/\s]+/)) return false;
+                        // Keine "Finanzierungs-Nr" Namen
+                        if (name.toLowerCase().startsWith('finanzierungs')) return false;
+                        // Keine Adressen als Namen
+                        if (name.match(/\d{5}\s+[A-ZÄÖÜ]/)) {
+                            // Wenn PLZ drin: Nur behalten wenn am Ende
+                            const beforePlz = name.split(/\d{5}/)[0].trim();
+                            if (beforePlz.length > 10) return false;
+                        }
+                        return true;
+                    });
+                    
+                    const uniqueOrdner = [...new Set(cleanOrdner)];
                     console.log('📂 DEBUG: Auto-Ordner (nach Absender):', uniqueOrdner);
                     
                     // Custom-Ordner aus localStorage laden
@@ -545,40 +568,70 @@
                 // Beste Kategorie wählen
                 let kategorie = kategorieVorschlaege.length > 0 ? kategorieVorschlaege[0].kategorie : 'Sonstiges';
                 
-                // ABSENDER erkennen
+                // ABSENDER INTELLIGENT erkennen
                 let absender = null;
                 const behoerdenKeywords = ['hauptzollamt', 'finanzamt', 'zollamt', 'amtsgericht', 'landgericht', 'verwaltung', 'landesamt', 'bundesamt'];
                 const istBehoerde = behoerdenKeywords.some(kw => lowerText.includes(kw));
                 
-                const potentialLines = [];
-                for (let i = 0; i < Math.min(15, lines.length); i++) {
-                    const line = lines[i].trim();
-                    if (line.length < 3 || line.length > 100) continue;
-                    if (line.match(/^\d+$/)) continue;
-                    if (line.match(/^\d{1,2}\.\d{1,2}\.\d{2,4}$/)) continue;
-                    if (line.toLowerCase().includes('postfach')) continue;
-                    if (line.toLowerCase().includes('telefon')) continue;
-                    if (line.toLowerCase().includes('e-mail')) continue;
-                    if (line.toLowerCase().includes('fax')) continue;
-                    
-                    potentialLines.push(line);
-                    if (potentialLines.length >= 4) break;
+                // NEU: Suche nach Firmen-Patterns
+                const firmenPatterns = [
+                    /([A-ZÄÖÜ][a-zäöüß]+(?:\s+[A-ZÄÖÜ][a-zäöüß]+)*)\s+(?:GmbH|AG|KG|OHG|PartG|mbH|e\.V\.|eV)/g,
+                    /(?:Hauptzollamt|Finanzamt|Amtsgericht)\s+([A-ZÄÖÜ][a-zäöüß]+)/g,
+                    /(DAK|Barmer|AOK|TK|Techniker\s+Krankenkasse)[-\s]*(Gesundheit)?/gi,
+                    /([A-ZÄÖÜ][a-zäöüß]+)\s+(?:Consumer\s+)?Bank/g,
+                    /Obergerichtsvollzieherin?\s+.*?([A-ZÄÖÜ][a-zäöüß]+\s+[A-ZÄÖÜ][a-zäöüß]+)(?:\s+\d{5})?/g
+                ];
+                
+                // Versuche Firmen-Pattern zu matchen
+                for (const pattern of firmenPatterns) {
+                    const match = text.match(pattern);
+                    if (match && match[0]) {
+                        absender = match[0].trim();
+                        // Bereinige: Entferne PLZ/Adresse am Ende
+                        absender = absender.replace(/\s+\d{5}\s+[A-ZÄÖÜ][a-zäöüß]+.*$/, '');
+                        // Maximal 60 Zeichen
+                        if (absender.length > 60) {
+                            absender = absender.substring(0, 60).trim();
+                        }
+                        console.log('✅ DEBUG: Absender via Pattern erkannt:', absender);
+                        break;
+                    }
                 }
                 
-                if (potentialLines.length > 0) {
-                    if (istBehoerde && potentialLines.length >= 2) {
-                        let behoerdenName = potentialLines[0];
-                        for (let i = 1; i < Math.min(3, potentialLines.length); i++) {
-                            const nextLine = potentialLines[i].replace(/^[-\s]+/, '').trim();
-                            if (nextLine.match(/^[-A-ZÄÖÜ]/) || nextLine.length < 50) {
-                                behoerdenName += ' ' + nextLine;
-                            } else {
-                                break;
-                            }
-                        }
-                        absender = behoerdenName;
-                    } else {
+                // Fallback: Erste sinnvolle Zeile
+                if (!absender) {
+                    const potentialLines = [];
+                    for (let i = 0; i < Math.min(15, lines.length); i++) {
+                        const line = lines[i].trim();
+                        // Überspringe zu kurze/lange Zeilen
+                        if (line.length < 3 || line.length > 100) continue;
+                        // Überspringe reine Zahlen
+                        if (line.match(/^[\d\s\.\-\/]+$/)) continue;
+                        // Überspringe Datumszeilen
+                        if (line.match(/\d{1,2}\.\d{1,2}\.\d{2,4}/)) continue;
+                        // Überspringe bekannte Müll-Zeilen
+                        if (line.toLowerCase().includes('postfach')) continue;
+                        if (line.toLowerCase().includes('telefon')) continue;
+                        if (line.toLowerCase().includes('e-mail')) continue;
+                        if (line.toLowerCase().includes('fax')) continue;
+                        if (line.toLowerCase().includes('www.')) continue;
+                        if (line.toLowerCase().includes('kontakt')) continue;
+                        if (line.toLowerCase().includes('sprechzeiten')) continue;
+                        if (line.toLowerCase().startsWith('bei umzug')) continue;
+                        
+                        potentialLines.push(line);
+                        if (potentialLines.length >= 3) break;
+                    }
+                    
+                    if (potentialLines.length > 0) {
+                        // Nimm erste Zeile, kürze auf 50 Zeichen
                         absender = potentialLines[0];
+                        if (absender.length > 50) {
+                            // Versuche bei Leerzeichen zu kürzen
+                            const words = absender.split(/\s+/);
+                            absender = words.slice(0, 4).join(' ');
+                        }
+                        console.log('⚠️ DEBUG: Absender via Fallback:', absender);
                     }
                 }
                 
