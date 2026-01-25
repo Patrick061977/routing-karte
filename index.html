@@ -93,9 +93,9 @@
 
         // Kategorien für Auto-Erkennung (Priorität beachten!)
         const KATEGORIEN = {
+            versicherung: ['versicherung', 'krankenkasse', 'krankenversicherung', 'dak', 'gesundheit', 'allianz', 'huk', 'ergo', 'axa', 'signal iduna', 'debeka', 'generali', 'provinzial', 'techniker krankenkasse', 'barmer', 'aok'],
             steuer: ['hauptzollamt', 'finanzamt', 'zollamt', 'steuerbescheid', 'kraftfahrzeugsteuer', 'kfz-steuer', 'vollstreckung'],
             treibstoff: ['shell', 'aral', 'esso', 'total', 'jet', 'tankstelle', 'benzin', 'diesel', 'kraftstoff', 'tanken'],
-            versicherung: ['versicherung', 'allianz', 'huk', 'ergo', 'axa', 'signal iduna', 'debeka', 'generali', 'provinzial'],
             reparatur: ['werkstatt', 'reparatur', 'autowerkstatt', 'kfz-werkstatt', 'atü', 'dekra', 'tüv', 'inspektion', 'service'],
             miete: ['miete', 'pacht', 'vermietung', 'mietvertrag', 'garage', 'stellplatz'],
             telekom: ['telekom', 'telefon', 'internet', 'vodafone', 'o2', 'mobilfunk', '1&1'],
@@ -103,7 +103,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "3.0.0";
+        const VERSION = "3.3.0 - Smart Kategorie-Vorschläge";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dashboard');
@@ -118,6 +118,11 @@
             const [statusFilter, setStatusFilter] = useState('alle');
             const [sortBy, setSortBy] = useState('datum');
             const [sortOrder, setSortOrder] = useState('desc');
+            const [kiRegeln, setKiRegeln] = useState([]); // NEU: KI-Lernregeln
+            const [faelligeHeute, setFaelligeHeute] = useState([]);
+            const [faelligDieseWoche, setFaelligDieseWoche] = useState([]);
+            const [anomalien, setAnomalien] = useState([]);
+            const [kategorieVorschlag, setKategorieVorschlag] = useState(null); // NEU: Für Vorschlags-Modal
 
             useEffect(() => {
                 loadData();
@@ -136,11 +141,90 @@
                     // Ordner extrahieren
                     const uniqueOrdner = [...new Set(data.map(d => d.absender || d.lieferant).filter(Boolean))];
                     setOrdner(uniqueOrdner.sort());
+                    
+                    // NEU: KI-Regeln laden
+                    await loadKiRegeln();
+                    
+                    // NEU: Intelligente Analysen durchführen
+                    analyseSmartData(data);
                 } catch (error) {
                     console.error('Fehler beim Laden:', error);
                 } finally {
                     setLoading(false);
                 }
+            }
+            
+            // NEU: KI-Regeln aus Firebase laden
+            async function loadKiRegeln() {
+                try {
+                    const snapshot = await db.collection('ki_regeln').get();
+                    const regeln = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    setKiRegeln(regeln);
+                } catch (error) {
+                    console.error('Fehler beim Laden der KI-Regeln:', error);
+                }
+            }
+            
+            // NEU: Intelligente Daten-Analyse
+            function analyseSmartData(data) {
+                const heute = new Date();
+                heute.setHours(0, 0, 0, 0);
+                
+                const naechsteWoche = new Date();
+                naechsteWoche.setDate(naechsteWoche.getDate() + 7);
+                
+                // Fällig heute
+                const heuteF = data.filter(d => {
+                    if (d.status === 'bezahlt' || d.status === 'gebucht') return false;
+                    const faellig = d.faelligkeitsdatum || d.faelligAm;
+                    if (!faellig) return false;
+                    const faelligDate = new Date(faellig);
+                    faelligDate.setHours(0, 0, 0, 0);
+                    return faelligDate.getTime() === heute.getTime();
+                });
+                setFaelligeHeute(heuteF);
+                
+                // Fällig diese Woche
+                const wocheF = data.filter(d => {
+                    if (d.status === 'bezahlt' || d.status === 'gebucht') return false;
+                    const faellig = d.faelligkeitsdatum || d.faelligAm;
+                    if (!faellig) return false;
+                    const faelligDate = new Date(faellig);
+                    return faelligDate >= heute && faelligDate <= naechsteWoche;
+                });
+                setFaelligDieseWoche(wocheF);
+                
+                // Anomalien erkennen
+                const anomalienList = [];
+                
+                // Ungewöhnlich hohe Beträge pro Kategorie
+                const kategorienStats = {};
+                data.forEach(d => {
+                    if (!d.kategorie || !d.betrag) return;
+                    if (!kategorienStats[d.kategorie]) {
+                        kategorienStats[d.kategorie] = [];
+                    }
+                    kategorienStats[d.kategorie].push(parseFloat(d.betrag));
+                });
+                
+                Object.entries(kategorienStats).forEach(([kategorie, betraege]) => {
+                    if (betraege.length < 3) return;
+                    const durchschnitt = betraege.reduce((a, b) => a + b, 0) / betraege.length;
+                    const max = Math.max(...betraege);
+                    
+                    if (max > durchschnitt * 2) {
+                        anomalienList.push({
+                            typ: 'hoher_betrag',
+                            kategorie,
+                            text: `${kategorie}: Ungewöhnlich hoher Betrag (${max.toFixed(2)} € - Durchschnitt: ${durchschnitt.toFixed(2)} €)`
+                        });
+                    }
+                });
+                
+                setAnomalien(anomalienList);
             }
 
             async function handleFileUpload(files) {
@@ -252,30 +336,70 @@
                 setUploadProgress(prev => ({ ...prev, status: 'Analysiere Dokument...' }));
                 const analysis = analyzeTextIntelligent(fullText, avgConfidence);
 
-                // 6. Dokument in Firestore speichern
-                setUploadProgress(prev => ({ ...prev, status: 'Speichere in Datenbank...' }));
-                const dokument = {
+                // 6. NEUES FEATURE: Kategorie-Vorschlag anzeigen
+                const dokumentDaten = {
                     dateiname: file.name,
                     pdfUrl: pdfUrl,
                     thumbnail: thumbnailDataUrl,
                     volltext: fullText.substring(0, 15000),
                     absender: analysis.absender || 'Unbekannt',
-                    lieferant: analysis.absender || 'Unbekannt',
-                    beschreibung: analysis.beschreibung || file.name,
                     betrag: analysis.betrag || 0,
                     datum: analysis.datum || new Date().toISOString().split('T')[0],
                     rechnungsnummer: analysis.rechnungsnummer,
-                    belegnummer: analysis.rechnungsnummer,
                     kategorie: analysis.kategorie || 'Sonstiges',
+                    kategorieVorschlaege: analysis.kategorieVorschlaege,
                     faelligkeitsdatum: analysis.faelligkeitsdatum,
-                    faelligAm: analysis.faelligkeitsdatum,
+                    zusammenfassung: analysis.zusammenfassung,
+                    wichtigePunkte: analysis.wichtigePunkte,
+                    ocrConfidence: avgConfidence,
+                };
+                
+                // Zeige Vorschlags-Modal wenn Konfidenz < 80% oder mehrere Vorschläge
+                if (avgConfidence < 80 || (analysis.kategorieVorschlaege && analysis.kategorieVorschlaege.length > 1)) {
+                    return new Promise((resolve) => {
+                        setKategorieVorschlag({
+                            ...dokumentDaten,
+                            onAccept: async (data) => {
+                                setKategorieVorschlag(null);
+                                await saveDokument(data);
+                                resolve();
+                            },
+                            onReject: () => {
+                                setKategorieVorschlag(null);
+                                resolve();
+                            }
+                        });
+                    });
+                } else {
+                    // Hohe Konfidenz - speichere direkt
+                    await saveDokument(dokumentDaten);
+                }
+            }
+            
+            // Hilfsfunktion zum Speichern
+            async function saveDokument(dokData) {
+                const dokument = {
+                    dateiname: dokData.dateiname,
+                    pdfUrl: dokData.pdfUrl,
+                    thumbnail: dokData.thumbnail,
+                    volltext: dokData.volltext,
+                    absender: dokData.absender,
+                    lieferant: dokData.absender,
+                    beschreibung: `${dokData.kategorie} - ${dokData.absender}`,
+                    betrag: dokData.betrag,
+                    datum: dokData.datum,
+                    rechnungsnummer: dokData.rechnungsnummer,
+                    belegnummer: dokData.rechnungsnummer,
+                    kategorie: dokData.kategorie,
+                    faelligkeitsdatum: dokData.faelligkeitsdatum,
+                    faelligAm: dokData.faelligkeitsdatum,
                     ustSatz: '19',
                     status: 'offen',
                     prioritaet: 'mittel',
                     typ: 'eingangsrechnung',
-                    ocrConfidence: avgConfidence,
-                    zusammenfassung: analysis.zusammenfassung,
-                    wichtigePunkte: analysis.wichtigePunkte,
+                    ocrConfidence: dokData.ocrConfidence,
+                    zusammenfassung: dokData.zusammenfassung,
+                    wichtigePunkte: dokData.wichtigePunkte,
                     hochgeladenAm: new Date().toISOString(),
                     erstelltAm: new Date().toISOString(),
                     version: VERSION,
@@ -288,16 +412,50 @@
                 const lowerText = text.toLowerCase();
                 const lines = text.split('\n').filter(line => line.trim().length > 0);
                 
-                // KATEGORIE bestimmen (mit Priorität)
-                let kategorie = 'Sonstiges';
+                // NEU: KATEGORIE mit KONFIDENZ-SCORES bestimmen
+                let kategorieScores = {};
+                
+                // Initialisiere alle Kategorien mit 0
+                Object.keys(KATEGORIEN).forEach(kat => {
+                    kategorieScores[kat] = 0;
+                });
+                
+                // Zähle Keyword-Treffer
                 for (const [kat, keywords] of Object.entries(KATEGORIEN)) {
-                    if (keywords.some(kw => lowerText.includes(kw))) {
-                        kategorie = kat.charAt(0).toUpperCase() + kat.slice(1);
-                        break; // Erste gefundene Kategorie verwenden
-                    }
+                    keywords.forEach(keyword => {
+                        const regex = new RegExp(keyword, 'gi');
+                        const matches = (lowerText.match(regex) || []).length;
+                        kategorieScores[kat] += matches * 10; // Jeder Treffer gibt 10 Punkte
+                    });
                 }
-
-                // ABSENDER erkennen (verbesserte Logik für Behörden)
+                
+                // KI-Regeln anwenden (geben 50 Punkte!)
+                kiRegeln.forEach(regel => {
+                    if (regel.typ === 'kategorie' && lowerText.includes(regel.trigger.toLowerCase())) {
+                        const katName = regel.wert.toLowerCase();
+                        if (kategorieScores[katName] !== undefined) {
+                            kategorieScores[katName] += 50;
+                        }
+                    }
+                });
+                
+                // Sortiere nach Score
+                const sortedKategorien = Object.entries(kategorieScores)
+                    .sort((a, b) => b[1] - a[1])
+                    .filter(([_, score]) => score > 0);
+                
+                // Berechne Prozent-Konfidenz
+                const totalScore = sortedKategorien.reduce((sum, [_, score]) => sum + score, 0);
+                const kategorieVorschlaege = sortedKategorien.slice(0, 3).map(([kat, score]) => ({
+                    kategorie: kat.charAt(0).toUpperCase() + kat.slice(1),
+                    konfidenz: totalScore > 0 ? Math.round((score / totalScore) * 100) : 0,
+                    score: score
+                }));
+                
+                // Beste Kategorie wählen
+                let kategorie = kategorieVorschlaege.length > 0 ? kategorieVorschlaege[0].kategorie : 'Sonstiges';
+                
+                // ABSENDER erkennen
                 let absender = null;
                 const behoerdenKeywords = ['hauptzollamt', 'finanzamt', 'zollamt', 'amtsgericht', 'landgericht', 'verwaltung', 'landesamt', 'bundesamt'];
                 const istBehoerde = behoerdenKeywords.some(kw => lowerText.includes(kw));
@@ -335,13 +493,21 @@
                 }
                 
                 if (!absender) absender = 'Unbekannt';
+                
+                // KI-Regeln anwenden für Absender-Mapping
+                kiRegeln.forEach(regel => {
+                    if (regel.typ === 'absender' && absender.toLowerCase().includes(regel.trigger.toLowerCase())) {
+                        absender = regel.wert;
+                    }
+                });
 
-                // BETRAG erkennen (mit Priorität)
+                // BETRAG erkennen - DEUTSCHE ZAHLENFORMATE (2.434,45)
                 const betragPatterns = [
-                    { regex: /(?:gesamt|summe|total|restforderung|gesamtbetrag)[:\s]+(\d{1,6}[,\.]\d{2})/gi, priority: 3 },
-                    { regex: /(?:betrag)[:\s]+(\d{1,6}[,\.]\d{2})/gi, priority: 2 },
-                    { regex: /(\d{1,6}[,\.]\d{2})\s*€/g, priority: 1 },
-                    { regex: /€\s*(\d{1,6}[,\.]\d{2})/g, priority: 1 },
+                    { regex: /(?:gesamt|summe|total|restforderung|gesamtbetrag|gesamtsaldo)[:\s]+(\d{1,3}(?:\.\d{3})*,\d{2})/gi, priority: 4 },
+                    { regex: /(?:betrag)[:\s]+(\d{1,3}(?:\.\d{3})*,\d{2})/gi, priority: 3 },
+                    { regex: /(\d{1,3}(?:\.\d{3})*,\d{2})\s*€/g, priority: 2 },
+                    { regex: /€\s*(\d{1,3}(?:\.\d{3})*,\d{2})/g, priority: 2 },
+                    { regex: /(\d{1,3}(?:\.\d{3})*,\d{2})\s*EUR/gi, priority: 2 },
                 ];
                 
                 let betrag = null;
@@ -350,7 +516,7 @@
                 for (const pattern of betragPatterns) {
                     const matches = [...text.matchAll(pattern.regex)];
                     for (const match of matches) {
-                        const betragStr = match[1].replace(',', '.');
+                        const betragStr = match[1].replace(/\./g, '').replace(',', '.');
                         const betragNum = parseFloat(betragStr);
                         if (!isNaN(betragNum) && betragNum > 0 && betragNum < 1000000) {
                             allBetraege.push({ betrag: betragNum, priority: pattern.priority });
@@ -426,7 +592,7 @@
                     faelligkeitsdatum = d.toISOString().split('T')[0];
                 }
 
-                // ZUSAMMENFASSUNG erstellen (erste 3 Sätze)
+                // ZUSAMMENFASSUNG erstellen
                 const saetze = text.match(/[^.!?]+[.!?]+/g) || [];
                 const zusammenfassung = saetze.slice(0, 3).join(' ').trim().substring(0, 300);
 
@@ -450,7 +616,8 @@
                     faelligkeitsdatum,
                     beschreibung,
                     zusammenfassung,
-                    wichtigePunkte
+                    wichtigePunkte,
+                    kategorieVorschlaege // NEU: Rückgabe der Top 3 Vorschläge
                 };
             }
 
@@ -460,8 +627,59 @@
             }
 
             async function updateDokument(id, data) {
+                const alteDaten = dokumente.find(d => d.id === id);
+                
                 await db.collection('dokumente').doc(id).update(data);
+                
+                // NEU: KI lernt aus Änderungen
+                if (alteDaten) {
+                    // Kategorie-Änderung → Regel lernen
+                    if (data.kategorie && data.kategorie !== alteDaten.kategorie && alteDaten.absender) {
+                        await lernKiRegel('kategorie', alteDaten.absender, data.kategorie);
+                    }
+                    
+                    // Absender-Änderung → Regel lernen
+                    if (data.absender && data.absender !== alteDaten.absender && alteDaten.absender) {
+                        await lernKiRegel('absender', alteDaten.absender, data.absender);
+                    }
+                }
+                
                 await loadData();
+            }
+            
+            // NEU: KI-Regel lernen
+            async function lernKiRegel(typ, trigger, wert) {
+                try {
+                    // Prüfe ob Regel schon existiert
+                    const existiert = await db.collection('ki_regeln')
+                        .where('typ', '==', typ)
+                        .where('trigger', '==', trigger)
+                        .get();
+                    
+                    if (existiert.empty) {
+                        // Neue Regel erstellen
+                        await db.collection('ki_regeln').add({
+                            typ,
+                            trigger,
+                            wert,
+                            gelerntAm: new Date().toISOString(),
+                            angewendet: 1
+                        });
+                        console.log(`✅ KI gelernt: ${trigger} → ${wert}`);
+                    } else {
+                        // Regel aktualisieren (Zähler erhöhen)
+                        const regel = existiert.docs[0];
+                        await db.collection('ki_regeln').doc(regel.id).update({
+                            wert, // Wert aktualisieren falls geändert
+                            angewendet: (regel.data().angewendet || 0) + 1
+                        });
+                        console.log(`✅ KI-Regel verstärkt: ${trigger} → ${wert}`);
+                    }
+                    
+                    await loadKiRegeln();
+                } catch (error) {
+                    console.error('Fehler beim Lernen:', error);
+                }
             }
 
             async function deleteDokument(id, pdfUrl) {
@@ -548,7 +766,7 @@
                             <div className="flex justify-between items-center">
                                 <div>
                                     <h1 className="text-2xl font-bold">🚕 Funk Taxi Heringsdorf</h1>
-                                    <p className="text-blue-200 text-sm">Premium Buchhaltungssoftware v{VERSION} • Tesseract OCR</p>
+                                    <p className="text-blue-200 text-sm">Premium Buchhaltungssoftware v{VERSION}</p>
                                 </div>
                                 <div className="text-right">
                                     <div className="flex items-center gap-2 mb-1">
@@ -655,6 +873,33 @@
                 .filter(d => d.typ === 'eingangsrechnung' || d.typ === 'tankbeleg' || d.typ === 'quittung')
                 .reduce((sum, d) => sum + (parseFloat(d.betrag) || 0), 0);
 
+            // Intelligente Analysen
+            const heute = new Date();
+            heute.setHours(0, 0, 0, 0);
+            
+            const naechsteWoche = new Date();
+            naechsteWoche.setDate(naechsteWoche.getDate() + 7);
+            
+            const faelligHeute = dokumente.filter(d => {
+                if (d.status === 'bezahlt' || d.status === 'gebucht') return false;
+                const faellig = d.faelligkeitsdatum || d.faelligAm;
+                if (!faellig) return false;
+                const faelligDate = new Date(faellig);
+                faelligDate.setHours(0, 0, 0, 0);
+                return faelligDate.getTime() === heute.getTime();
+            });
+            
+            const faelligWoche = dokumente.filter(d => {
+                if (d.status === 'bezahlt' || d.status === 'gebucht') return false;
+                const faellig = d.faelligkeitsdatum || d.faelligAm;
+                if (!faellig) return false;
+                const faelligDate = new Date(faellig);
+                return faelligDate > heute && faelligDate <= naechsteWoche;
+            });
+            
+            const summeHeute = faelligHeute.reduce((s, d) => s + (parseFloat(d.betrag) || 0), 0);
+            const summeWoche = faelligWoche.reduce((s, d) => s + (parseFloat(d.betrag) || 0), 0);
+
             const hochprioDokumente = dokumente
                 .filter(d => {
                     if (d.status === 'bezahlt' || d.status === 'gebucht') return false;
@@ -668,11 +913,62 @@
             return (
                 <div className="space-y-6">
                     <div className="flex justify-between items-center">
-                        <h2 className="text-3xl font-bold text-gray-800">Dashboard</h2>
+                        <h2 className="text-3xl font-bold text-gray-800">🤖 Intelligentes Dashboard</h2>
                         <div className="bg-purple-100 px-4 py-2 rounded-lg border border-purple-300">
-                            <p className="text-sm text-purple-800 font-semibold">🚀 Version {version} - Premium OCR</p>
+                            <p className="text-sm text-purple-800 font-semibold">🚀 {version}</p>
                         </div>
                     </div>
+                    
+                    {/* NEU: HEUTE FÄLLIG - Smart Alert */}
+                    {faelligHeute.length > 0 && (
+                        <div className="bg-red-50 border-l-4 border-red-600 rounded-lg shadow-lg p-6">
+                            <h3 className="text-xl font-bold text-red-800 mb-3 flex items-center gap-2">
+                                🔥 HEUTE FÄLLIG - {faelligHeute.length} Rechnung{faelligHeute.length > 1 ? 'en' : ''}
+                                <span className="text-2xl font-bold">{summeHeute.toFixed(2)} €</span>
+                            </h3>
+                            <div className="space-y-2">
+                                {faelligHeute.map(dok => (
+                                    <div key={dok.id} className="bg-white p-3 rounded flex justify-between items-center">
+                                        <div>
+                                            <p className="font-semibold">{dok.beschreibung || dok.absender}</p>
+                                            <p className="text-sm text-gray-600">{parseFloat(dok.betrag || 0).toFixed(2)} €</p>
+                                        </div>
+                                        <button 
+                                            onClick={() => alert('Zahlungs-Integration: Coming Soon!')}
+                                            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700"
+                                        >
+                                            💳 Jetzt bezahlen
+                                        </button>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* NEU: DIESE WOCHE FÄLLIG */}
+                    {faelligWoche.length > 0 && (
+                        <div className="bg-yellow-50 border-l-4 border-yellow-500 rounded-lg shadow-lg p-6">
+                            <h3 className="text-xl font-bold text-yellow-800 mb-3">
+                                ⚠️ DIESE WOCHE FÄLLIG - {faelligWoche.length} Rechnung{faelligWoche.length > 1 ? 'en' : ''}
+                                <span className="ml-3 text-lg">Gesamt: {summeWoche.toFixed(2)} €</span>
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {faelligWoche.slice(0, 6).map(dok => {
+                                    const faellig = dok.faelligkeitsdatum || dok.faelligAm;
+                                    const tageNoch = Math.ceil((new Date(faellig) - heute) / (1000 * 60 * 60 * 24));
+                                    return (
+                                        <div key={dok.id} className="bg-white p-3 rounded">
+                                            <p className="font-semibold text-sm">{dok.beschreibung || dok.absender}</p>
+                                            <div className="flex justify-between items-center mt-1">
+                                                <span className="text-sm text-gray-600">{parseFloat(dok.betrag || 0).toFixed(2)} €</span>
+                                                <span className="text-xs bg-yellow-200 px-2 py-1 rounded">in {tageNoch} Tag{tageNoch > 1 ? 'en' : ''}</span>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
                     
                     {/* Status Cards */}
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
@@ -771,7 +1067,16 @@
                 <div className="flex gap-6">
                     {/* Sidebar - Ordner */}
                     <div className="w-64 bg-white rounded-lg shadow-md p-4 h-fit">
-                        <h2 className="font-bold text-gray-800 mb-3">📁 Ordner</h2>
+                        <div className="flex justify-between items-center mb-3">
+                            <h2 className="font-bold text-gray-800">📁 Ordner</h2>
+                            <button
+                                onClick={() => alert('Ordner-Verwaltung: Umbenennen, Zusammenführen, Favoriten - Coming Soon!')}
+                                className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
+                                title="Ordner verwalten"
+                            >
+                                ⚙️
+                            </button>
+                        </div>
                         
                         <button
                             onClick={() => setSelectedOrdner('alle')}
@@ -880,6 +1185,15 @@
                     {/* PDF Viewer */}
                     {selectedDokument && (
                         <PDFViewer dokument={selectedDokument} onClose={() => setSelectedDokument(null)} />
+                    )}
+                    
+                    {/* NEU: Kategorie-Vorschlag Modal */}
+                    {kategorieVorschlag && (
+                        <KategorieVorschlagModal 
+                            vorschlag={kategorieVorschlag}
+                            onAccept={kategorieVorschlag.onAccept}
+                            onReject={kategorieVorschlag.onReject}
+                        />
                     )}
                 </div>
             );
@@ -1196,6 +1510,118 @@
                             </div>
                         </div>
                     )}
+                </div>
+            );
+        }
+
+        function KategorieVorschlagModal({ vorschlag, onAccept, onReject }) {
+            const [selectedKategorie, setSelectedKategorie] = useState(vorschlag.kategorieVorschlaege[0]?.kategorie || 'Sonstiges');
+            
+            const kategorieIcons = {
+                'Versicherung': '🛡️',
+                'Steuer': '🏛️',
+                'Treibstoff': '⛽',
+                'Reparatur': '🔧',
+                'Miete': '🏠',
+                'Telekom': '📱',
+                'Strom': '⚡',
+                'Sonstiges': '💰'
+            };
+            
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg max-w-2xl w-full p-6 shadow-2xl">
+                        <h2 className="text-2xl font-bold text-gray-800 mb-4">🤖 KI-Kategorie-Vorschlag</h2>
+                        
+                        {/* Erkannte Daten */}
+                        <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                            <h3 className="font-semibold text-sm text-gray-700 mb-2">Erkannte Daten:</h3>
+                            <div className="grid grid-cols-2 gap-3 text-sm">
+                                <div><span className="text-gray-600">Absender:</span> <span className="font-semibold">{vorschlag.absender}</span></div>
+                                {vorschlag.betrag && <div><span className="text-gray-600">Betrag:</span> <span className="font-semibold">{vorschlag.betrag.toFixed(2)} €</span></div>}
+                                {vorschlag.datum && <div><span className="text-gray-600">Datum:</span> <span className="font-semibold">{new Date(vorschlag.datum).toLocaleDateString('de-DE')}</span></div>}
+                                {vorschlag.rechnungsnummer && <div><span className="text-gray-600">Rechnung:</span> <span className="font-semibold">{vorschlag.rechnungsnummer}</span></div>}
+                            </div>
+                        </div>
+                        
+                        {/* Kategorie-Vorschläge */}
+                        <div className="mb-6">
+                            <h3 className="font-semibold text-lg text-gray-800 mb-3">Kategorie-Vorschläge:</h3>
+                            
+                            {vorschlag.kategorieVorschlaege && vorschlag.kategorieVorschlaege.length > 0 ? (
+                                <div className="space-y-3">
+                                    {vorschlag.kategorieVorschlaege.map((kat, idx) => (
+                                        <div 
+                                            key={idx}
+                                            onClick={() => setSelectedKategorie(kat.kategorie)}
+                                            className={`p-4 rounded-lg cursor-pointer border-2 transition-all ${
+                                                selectedKategorie === kat.kategorie 
+                                                    ? 'border-blue-500 bg-blue-50' 
+                                                    : 'border-gray-200 hover:border-blue-300'
+                                            }`}
+                                        >
+                                            <div className="flex justify-between items-center">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="text-3xl">{kategorieIcons[kat.kategorie] || '📁'}</span>
+                                                    <div>
+                                                        <p className="font-bold text-lg">{kat.kategorie}</p>
+                                                        {idx === 0 && <p className="text-xs text-green-600 font-semibold">✨ Empfohlen</p>}
+                                                    </div>
+                                                </div>
+                                                <div className="text-right">
+                                                    <p className="text-2xl font-bold text-blue-600">{kat.konfidenz}%</p>
+                                                    <div className="w-32 bg-gray-200 rounded-full h-2 mt-1">
+                                                        <div 
+                                                            className="bg-blue-600 h-2 rounded-full transition-all"
+                                                            style={{ width: `${kat.konfidenz}%` }}
+                                                        ></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="bg-yellow-50 border border-yellow-200 rounded p-4">
+                                    <p className="text-sm text-yellow-800">Keine eindeutige Kategorie erkannt. Bitte manuell wählen:</p>
+                                </div>
+                            )}
+                            
+                            {/* Manuelle Auswahl */}
+                            <div className="mt-4">
+                                <label className="block text-sm font-medium text-gray-700 mb-2">Oder manuell wählen:</label>
+                                <select
+                                    value={selectedKategorie}
+                                    onChange={(e) => setSelectedKategorie(e.target.value)}
+                                    className="w-full p-2 border rounded-lg"
+                                >
+                                    {Object.keys(kategorieIcons).map(kat => (
+                                        <option key={kat} value={kat}>{kategorieIcons[kat]} {kat}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                        
+                        {/* Buttons */}
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => onAccept({ ...vorschlag, kategorie: selectedKategorie })}
+                                className="flex-1 bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 font-semibold text-lg"
+                            >
+                                ✅ {selectedKategorie} übernehmen
+                            </button>
+                            <button
+                                onClick={onReject}
+                                className="px-6 py-3 bg-gray-300 text-gray-800 rounded-lg hover:bg-gray-400"
+                            >
+                                ❌ Abbrechen
+                            </button>
+                        </div>
+                        
+                        <p className="text-xs text-gray-500 mt-4 text-center">
+                            💡 Tipp: Die KI lernt aus deiner Auswahl und wird beim nächsten Mal besser!
+                        </p>
+                    </div>
                 </div>
             );
         }
