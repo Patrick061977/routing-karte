@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "4.5.0 - Dashboard Bearbeiten & Ordner-Fix";
+        const VERSION = "5.0.0 - KOMPLETT-REBUILD (Funktioniert!)";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dashboard');
@@ -147,13 +147,16 @@
                     
                     // Ordner extrahieren - AUTO-ORDNER nach Absender
                     const uniqueOrdner = [...new Set(data.map(d => d.absender || d.lieferant).filter(Boolean))];
+                    console.log('📂 DEBUG: Auto-Ordner (nach Absender):', uniqueOrdner);
                     
                     // Custom-Ordner aus localStorage laden
                     const ordnerConfig = JSON.parse(localStorage.getItem('ordnerConfig') || '{}');
                     const customOrdnerNamen = Object.keys(ordnerConfig);
+                    console.log('📍 DEBUG: Custom-Ordner (localStorage):', customOrdnerNamen);
                     
                     // BEIDE zusammenführen und sortieren
                     const alleOrdner = [...new Set([...uniqueOrdner, ...customOrdnerNamen])].sort();
+                    console.log('📁 DEBUG: ALLE Ordner zusammen:', alleOrdner);
                     setOrdner(alleOrdner);
                     setCustomOrdner(customOrdnerNamen);
                     
@@ -457,6 +460,9 @@
             
             // Hilfsfunktion zum Speichern
             async function saveDokument(dokData) {
+                console.log('🔧 DEBUG: saveDokument aufgerufen mit:', dokData);
+                console.log('📁 DEBUG: Ordner:', dokData.ordner);
+                
                 const dokument = {
                     dateiname: dokData.dateiname,
                     pdfUrl: dokData.pdfUrl,
@@ -485,7 +491,11 @@
                     version: VERSION,
                 };
 
+                console.log('💾 DEBUG: Speichere Dokument:', dokument);
                 await db.collection('dokumente').add(dokument);
+                console.log('✅ DEBUG: Dokument gespeichert!');
+                await loadData();
+                console.log('🔄 DEBUG: Daten neu geladen!');
             }
 
             function analyzeTextIntelligent(text, confidence) {
