@@ -103,7 +103,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "3.3.1 - Smart Kategorie-Vorschläge";
+        const VERSION = "3.4.0 - Dubletten & Sortierung";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dashboard');
@@ -122,7 +122,8 @@
             const [faelligeHeute, setFaelligeHeute] = useState([]);
             const [faelligDieseWoche, setFaelligDieseWoche] = useState([]);
             const [anomalien, setAnomalien] = useState([]);
-            const [kategorieVorschlag, setKategorieVorschlag] = useState(null); // NEU: Für Vorschlags-Modal
+            const [kategorieVorschlag, setKategorieVorschlag] = useState(null);
+            const [dublettenWarnung, setDublettenWarnung] = useState(null); // NEU
 
             useEffect(() => {
                 loadData();
@@ -338,6 +339,43 @@
                 setUploadProgress(prev => ({ ...prev, status: 'Analysiere Dokument...' }));
                 const analysis = analyzeTextIntelligent(fullText, avgConfidence);
 
+                // 5a. NEU: Dubletten-Check
+                setUploadProgress(prev => ({ ...prev, status: 'Prüfe auf Duplikate...' }));
+                const duplicate = await checkDublette(analysis);
+                
+                if (duplicate) {
+                    // Duplikat gefunden - zeige Warnung
+                    return new Promise((resolve) => {
+                        setDublettenWarnung({
+                            neuesDok: {
+                                dateiname: file.name,
+                                absender: analysis.absender,
+                                betrag: analysis.betrag,
+                                datum: analysis.datum,
+                            },
+                            existingDok: duplicate,
+                            onConfirm: async () => {
+                                setDublettenWarnung(null);
+                                // User will trotzdem hochladen - weiter mit Kategorie-Vorschlag
+                                await continueUpload(file, pdfUrl, thumbnailDataUrl, fullText, avgConfidence, analysis);
+                                resolve();
+                            },
+                            onCancel: () => {
+                                setDublettenWarnung(null);
+                                // Abbrechen - lösche hochgeladenes PDF
+                                storage.refFromURL(pdfUrl).delete();
+                                resolve();
+                            }
+                        });
+                    });
+                } else {
+                    // Kein Duplikat - weiter normal
+                    await continueUpload(file, pdfUrl, thumbnailDataUrl, fullText, avgConfidence, analysis);
+                }
+            }
+            
+            // NEU: Upload fortsetzen nach Dubletten-Check
+            async function continueUpload(file, pdfUrl, thumbnailDataUrl, fullText, avgConfidence, analysis) {
                 // 6. NEUES FEATURE: Kategorie-Vorschlag anzeigen
                 const dokumentDaten = {
                     dateiname: file.name,
@@ -375,6 +413,47 @@
                 } else {
                     // Hohe Konfidenz - speichere direkt
                     await saveDokument(dokumentDaten);
+                }
+            }
+            
+            // NEU: Dubletten-Check
+            async function checkDublette(analysis) {
+                try {
+                    const snapshot = await db.collection('dokumente').get();
+                    const existingDocs = snapshot.docs.map(doc => ({
+                        id: doc.id,
+                        ...doc.data()
+                    }));
+                    
+                    // Prüfe auf Duplikate
+                    const potentialDuplicates = existingDocs.filter(dok => {
+                        // Check 1: Gleicher Absender
+                        const absenderMatch = dok.absender && analysis.absender && 
+                            dok.absender.toLowerCase().includes(analysis.absender.toLowerCase().substring(0, 10));
+                        
+                        // Check 2: Ähnlicher Betrag (±5%)
+                        const betragMatch = dok.betrag && analysis.betrag && 
+                            Math.abs(dok.betrag - analysis.betrag) / analysis.betrag < 0.05;
+                        
+                        // Check 3: Ähnliches Datum (±7 Tage)
+                        let datumMatch = false;
+                        if (dok.datum && analysis.datum) {
+                            const diff = Math.abs(new Date(dok.datum) - new Date(analysis.datum)) / (1000 * 60 * 60 * 24);
+                            datumMatch = diff <= 7;
+                        }
+                        
+                        // Check 4: Gleiche Rechnungsnummer
+                        const rechnungMatch = dok.rechnungsnummer && analysis.rechnungsnummer && 
+                            dok.rechnungsnummer === analysis.rechnungsnummer;
+                        
+                        // Duplikat wenn: (Absender UND Betrag UND Datum) ODER Rechnungsnummer
+                        return rechnungMatch || (absenderMatch && betragMatch && datumMatch);
+                    });
+                    
+                    return potentialDuplicates.length > 0 ? potentialDuplicates[0] : null;
+                } catch (error) {
+                    console.error('Fehler beim Dubletten-Check:', error);
+                    return null;
                 }
             }
             
@@ -713,8 +792,8 @@
                         bVal = parseFloat(b.betrag || 0);
                         break;
                     case 'absender':
-                        aVal = (a.absender || '').toLowerCase();
-                        bVal = (b.absender || '').toLowerCase();
+                        aVal = (a.absender || a.lieferant || '').toLowerCase();
+                        bVal = (b.absender || b.lieferant || '').toLowerCase();
                         break;
                     case 'status':
                         aVal = a.status || '';
@@ -1199,6 +1278,15 @@
                             onReject={kategorieVorschlag.onReject}
                         />
                     )}
+                    
+                    {/* NEU: Dubletten-Warnung Modal */}
+                    {dublettenWarnung && (
+                        <DublettenWarnungModal 
+                            warnung={dublettenWarnung}
+                            onConfirm={dublettenWarnung.onConfirm}
+                            onCancel={dublettenWarnung.onCancel}
+                        />
+                    )}
                 </div>
             );
         }
@@ -1514,6 +1602,74 @@
                             </div>
                         </div>
                     )}
+                </div>
+            );
+        }
+
+        function DublettenWarnungModal({ warnung, onConfirm, onCancel }) {
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white rounded-lg max-w-2xl w-full p-6 shadow-2xl">
+                        <h2 className="text-2xl font-bold text-orange-600 mb-4 flex items-center gap-2">
+                            ⚠️ Mögliches Duplikat gefunden!
+                        </h2>
+                        
+                        <div className="bg-orange-50 border-l-4 border-orange-500 p-4 mb-4">
+                            <p className="text-sm text-orange-800 font-semibold mb-2">
+                                Ein ähnliches Dokument existiert bereits in der Datenbank:
+                            </p>
+                        </div>
+                        
+                        {/* Vergleich */}
+                        <div className="grid grid-cols-2 gap-4 mb-6">
+                            {/* Neues Dokument */}
+                            <div className="bg-blue-50 rounded-lg p-4 border-2 border-blue-300">
+                                <h3 className="font-bold text-blue-800 mb-3">📄 Neues Dokument:</h3>
+                                <div className="space-y-2 text-sm">
+                                    <div><span className="text-gray-600">Datei:</span> <span className="font-semibold">{warnung.neuesDok.dateiname}</span></div>
+                                    {warnung.neuesDok.absender && <div><span className="text-gray-600">Absender:</span> <span className="font-semibold">{warnung.neuesDok.absender}</span></div>}
+                                    {warnung.neuesDok.betrag && <div><span className="text-gray-600">Betrag:</span> <span className="font-semibold">{warnung.neuesDok.betrag.toFixed(2)} €</span></div>}
+                                    {warnung.neuesDok.datum && <div><span className="text-gray-600">Datum:</span> <span className="font-semibold">{new Date(warnung.neuesDok.datum).toLocaleDateString('de-DE')}</span></div>}
+                                </div>
+                            </div>
+                            
+                            {/* Existierendes Dokument */}
+                            <div className="bg-red-50 rounded-lg p-4 border-2 border-red-300">
+                                <h3 className="font-bold text-red-800 mb-3">📋 Bereits vorhanden:</h3>
+                                <div className="space-y-2 text-sm">
+                                    <div><span className="text-gray-600">Datei:</span> <span className="font-semibold">{warnung.existingDok.dateiname}</span></div>
+                                    {warnung.existingDok.absender && <div><span className="text-gray-600">Absender:</span> <span className="font-semibold">{warnung.existingDok.absender}</span></div>}
+                                    {warnung.existingDok.betrag && <div><span className="text-gray-600">Betrag:</span> <span className="font-semibold">{parseFloat(warnung.existingDok.betrag).toFixed(2)} €</span></div>}
+                                    {warnung.existingDok.datum && <div><span className="text-gray-600">Datum:</span> <span className="font-semibold">{new Date(warnung.existingDok.datum).toLocaleDateString('de-DE')}</span></div>}
+                                    {warnung.existingDok.hochgeladenAm && (
+                                        <div><span className="text-gray-600">Hochgeladen:</span> <span className="font-semibold">{new Date(warnung.existingDok.hochgeladenAm).toLocaleDateString('de-DE')}</span></div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div className="bg-yellow-50 border border-yellow-200 rounded p-3 mb-6">
+                            <p className="text-sm text-yellow-800">
+                                💡 <strong>Hinweis:</strong> Die Dokumente sind sehr ähnlich. Möchtest du trotzdem fortfahren?
+                            </p>
+                        </div>
+                        
+                        {/* Buttons */}
+                        <div className="flex gap-3">
+                            <button
+                                onClick={onCancel}
+                                className="flex-1 bg-gray-300 text-gray-800 py-3 rounded-lg hover:bg-gray-400 font-semibold text-lg"
+                            >
+                                ❌ Abbrechen (nicht hochladen)
+                            </button>
+                            <button
+                                onClick={onConfirm}
+                                className="flex-1 bg-orange-600 text-white py-3 rounded-lg hover:bg-orange-700 font-semibold text-lg"
+                            >
+                                ⚠️ Trotzdem hochladen
+                            </button>
+                        </div>
+                    </div>
                 </div>
             );
         }
