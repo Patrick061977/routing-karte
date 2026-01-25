@@ -103,7 +103,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "3.4.0 - Dubletten & Sortierung";
+        const VERSION = "3.5.0 - Dubletten Fix & Ordner nach Adressen";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dashboard');
@@ -341,7 +341,33 @@
 
                 // 5a. NEU: Dubletten-Check
                 setUploadProgress(prev => ({ ...prev, status: 'Prüfe auf Duplikate...' }));
-                const duplicate = await checkDublette(analysis);
+                
+                // Prüfe auf Duplikate
+                const potentialDuplicates = dokumente.filter(dok => {
+                    // Check 1: Gleicher Absender
+                    const absenderMatch = dok.absender && analysis.absender && 
+                        dok.absender.toLowerCase().includes(analysis.absender.toLowerCase().substring(0, 10));
+                    
+                    // Check 2: Ähnlicher Betrag (±5%)
+                    const betragMatch = dok.betrag && analysis.betrag && 
+                        Math.abs(dok.betrag - analysis.betrag) / analysis.betrag < 0.05;
+                    
+                    // Check 3: Ähnliches Datum (±7 Tage)
+                    let datumMatch = false;
+                    if (dok.datum && analysis.datum) {
+                        const diff = Math.abs(new Date(dok.datum) - new Date(analysis.datum)) / (1000 * 60 * 60 * 24);
+                        datumMatch = diff <= 7;
+                    }
+                    
+                    // Check 4: Gleiche Rechnungsnummer
+                    const rechnungMatch = dok.rechnungsnummer && analysis.rechnungsnummer && 
+                        dok.rechnungsnummer === analysis.rechnungsnummer;
+                    
+                    // Duplikat wenn: (Absender UND Betrag UND Datum) ODER Rechnungsnummer
+                    return rechnungMatch || (absenderMatch && betragMatch && datumMatch);
+                });
+                
+                const duplicate = potentialDuplicates.length > 0 ? potentialDuplicates[0] : null;
                 
                 if (duplicate) {
                     // Duplikat gefunden - zeige Warnung
@@ -357,7 +383,7 @@
                             onConfirm: async () => {
                                 setDublettenWarnung(null);
                                 // User will trotzdem hochladen - weiter mit Kategorie-Vorschlag
-                                await continueUpload(file, pdfUrl, thumbnailDataUrl, fullText, avgConfidence, analysis);
+                                await continueUploadProcess(file, pdfUrl, thumbnailDataUrl, fullText, avgConfidence, analysis);
                                 resolve();
                             },
                             onCancel: () => {
@@ -370,12 +396,12 @@
                     });
                 } else {
                     // Kein Duplikat - weiter normal
-                    await continueUpload(file, pdfUrl, thumbnailDataUrl, fullText, avgConfidence, analysis);
+                    await continueUploadProcess(file, pdfUrl, thumbnailDataUrl, fullText, avgConfidence, analysis);
                 }
             }
             
             // NEU: Upload fortsetzen nach Dubletten-Check
-            async function continueUpload(file, pdfUrl, thumbnailDataUrl, fullText, avgConfidence, analysis) {
+            async function continueUploadProcess(file, pdfUrl, thumbnailDataUrl, fullText, avgConfidence, analysis) {
                 // 6. NEUES FEATURE: Kategorie-Vorschlag anzeigen
                 const dokumentDaten = {
                     dateiname: file.name,
@@ -413,47 +439,6 @@
                 } else {
                     // Hohe Konfidenz - speichere direkt
                     await saveDokument(dokumentDaten);
-                }
-            }
-            
-            // NEU: Dubletten-Check
-            async function checkDublette(analysis) {
-                try {
-                    const snapshot = await db.collection('dokumente').get();
-                    const existingDocs = snapshot.docs.map(doc => ({
-                        id: doc.id,
-                        ...doc.data()
-                    }));
-                    
-                    // Prüfe auf Duplikate
-                    const potentialDuplicates = existingDocs.filter(dok => {
-                        // Check 1: Gleicher Absender
-                        const absenderMatch = dok.absender && analysis.absender && 
-                            dok.absender.toLowerCase().includes(analysis.absender.toLowerCase().substring(0, 10));
-                        
-                        // Check 2: Ähnlicher Betrag (±5%)
-                        const betragMatch = dok.betrag && analysis.betrag && 
-                            Math.abs(dok.betrag - analysis.betrag) / analysis.betrag < 0.05;
-                        
-                        // Check 3: Ähnliches Datum (±7 Tage)
-                        let datumMatch = false;
-                        if (dok.datum && analysis.datum) {
-                            const diff = Math.abs(new Date(dok.datum) - new Date(analysis.datum)) / (1000 * 60 * 60 * 24);
-                            datumMatch = diff <= 7;
-                        }
-                        
-                        // Check 4: Gleiche Rechnungsnummer
-                        const rechnungMatch = dok.rechnungsnummer && analysis.rechnungsnummer && 
-                            dok.rechnungsnummer === analysis.rechnungsnummer;
-                        
-                        // Duplikat wenn: (Absender UND Betrag UND Datum) ODER Rechnungsnummer
-                        return rechnungMatch || (absenderMatch && betragMatch && datumMatch);
-                    });
-                    
-                    return potentialDuplicates.length > 0 ? potentialDuplicates[0] : null;
-                } catch (error) {
-                    console.error('Fehler beim Dubletten-Check:', error);
-                    return null;
                 }
             }
             
@@ -1155,11 +1140,25 @@
                         <div className="flex justify-between items-center mb-3">
                             <h2 className="font-bold text-gray-800">📁 Ordner</h2>
                             <button
-                                onClick={() => alert('Ordner-Verwaltung: Umbenennen, Zusammenführen, Favoriten - Coming Soon!')}
-                                className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600"
-                                title="Ordner verwalten"
+                                onClick={() => {
+                                    const name = prompt('📁 Neuer Ordner:\n\nName:');
+                                    if (name && name.trim()) {
+                                        const adresse = prompt('📍 Adresse für "' + name + '":\n\n(Optional - für automatische Zuordnung)');
+                                        // Speichere Ordner-Konfiguration
+                                        const ordnerConfig = JSON.parse(localStorage.getItem('ordnerConfig') || '{}');
+                                        ordnerConfig[name.trim()] = {
+                                            adresse: adresse?.trim() || '',
+                                            erstellt: new Date().toISOString()
+                                        };
+                                        localStorage.setItem('ordnerConfig', JSON.stringify(ordnerConfig));
+                                        alert('✅ Ordner "' + name.trim() + '" erstellt!');
+                                        window.location.reload();
+                                    }
+                                }}
+                                className="text-xs px-2 py-1 bg-green-500 text-white rounded hover:bg-green-600"
+                                title="Neuen Ordner erstellen"
                             >
-                                ⚙️
+                                ➕
                             </button>
                         </div>
                         
