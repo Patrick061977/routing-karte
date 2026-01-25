@@ -925,6 +925,8 @@
                                 setSelectedDokument={setSelectedDokument}
                                 kategorieVorschlag={kategorieVorschlag}
                                 setKategorieVorschlag={setKategorieVorschlag}
+                                dublettenWarnung={dublettenWarnung}
+                                setDublettenWarnung={setDublettenWarnung}
                             />
                         )}
                         
@@ -1131,7 +1133,7 @@
             );
         }
 
-        function DokumenteView({ dokumente, ordner, selectedOrdner, setSelectedOrdner, searchTerm, setSearchTerm, statusFilter, setStatusFilter, sortBy, setSortBy, sortOrder, setSortOrder, updateStatus, updateDokument, deleteDokument, handleFileUpload, uploading, uploadProgress, selectedDokument, setSelectedDokument, kategorieVorschlag, setKategorieVorschlag }) {
+        function DokumenteView({ dokumente, ordner, selectedOrdner, setSelectedOrdner, searchTerm, setSearchTerm, statusFilter, setStatusFilter, sortBy, setSortBy, sortOrder, setSortOrder, updateStatus, updateDokument, deleteDokument, handleFileUpload, uploading, uploadProgress, selectedDokument, setSelectedDokument, kategorieVorschlag, setKategorieVorschlag, dublettenWarnung, setDublettenWarnung }) {
             const filteredDokumente = dokumente.filter(dok => {
                 const matchOrdner = selectedOrdner === 'alle' || dok.absender === selectedOrdner || dok.lieferant === selectedOrdner;
                 const matchSearch = searchTerm === '' || 
