@@ -95,6 +95,7 @@
         const KATEGORIEN = {
             versicherung: ['versicherung', 'krankenkasse', 'krankenversicherung', 'dak', 'gesundheit', 'allianz', 'huk', 'ergo', 'axa', 'signal iduna', 'debeka', 'generali', 'provinzial', 'techniker krankenkasse', 'barmer', 'aok'],
             steuer: ['hauptzollamt', 'finanzamt', 'zollamt', 'steuerbescheid', 'kraftfahrzeugsteuer', 'kfz-steuer', 'vollstreckung'],
+            finanzierung: ['bank', 'finanzierung', 'kredit', 'darlehen', 'santander', 'sparkasse', 'volksbank', 'commerzbank', 'deutsche bank', 'postbank', 'targobank', 'ing', 'diba'],
             treibstoff: ['shell', 'aral', 'esso', 'total', 'jet', 'tankstelle', 'benzin', 'diesel', 'kraftstoff', 'tanken'],
             reparatur: ['werkstatt', 'reparatur', 'autowerkstatt', 'kfz-werkstatt', 'atü', 'dekra', 'tüv', 'inspektion', 'service'],
             miete: ['miete', 'pacht', 'vermietung', 'mietvertrag', 'garage', 'stellplatz'],
@@ -103,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "4.0.0 - Buchhaltungs-Agent";
+        const VERSION = "4.1.0 - Ordner-Fix & Auto-Ordner";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dashboard');
@@ -144,9 +145,17 @@
                     }));
                     setDokumente(data);
                     
-                    // Ordner extrahieren
+                    // Ordner extrahieren - AUTO-ORDNER nach Absender
                     const uniqueOrdner = [...new Set(data.map(d => d.absender || d.lieferant).filter(Boolean))];
-                    setOrdner(uniqueOrdner.sort());
+                    
+                    // Custom-Ordner aus localStorage laden
+                    const ordnerConfig = JSON.parse(localStorage.getItem('ordnerConfig') || '{}');
+                    const customOrdnerNamen = Object.keys(ordnerConfig);
+                    
+                    // BEIDE zusammenführen und sortieren
+                    const alleOrdner = [...new Set([...uniqueOrdner, ...customOrdnerNamen])].sort();
+                    setOrdner(alleOrdner);
+                    setCustomOrdner(customOrdnerNamen);
                     
                     // NEU: KI-Regeln laden
                     await loadKiRegeln();
@@ -1688,6 +1697,7 @@
             const kategorieIcons = {
                 'Versicherung': '🛡️',
                 'Steuer': '🏛️',
+                'Finanzierung': '🏦',
                 'Treibstoff': '⛽',
                 'Reparatur': '🔧',
                 'Miete': '🏠',
