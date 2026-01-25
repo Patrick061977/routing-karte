@@ -1274,6 +1274,7 @@
                                         updateDokument={updateDokument}
                                         deleteDokument={deleteDokument}
                                         setSelectedDokument={setSelectedDokument}
+                                        ordner={ordner}
                                     />
                                 ))
                             )}
@@ -1359,7 +1360,7 @@
             );
         }
 
-        function DokumentCard({ dokument, updateStatus, updateDokument, deleteDokument, setSelectedDokument }) {
+        function DokumentCard({ dokument, updateStatus, updateDokument, deleteDokument, setSelectedDokument, ordner }) {
             const [showText, setShowText] = useState(false);
             const [editing, setEditing] = useState(false);
             const [editData, setEditData] = useState({
