@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "4.1.0 - Ordner-Fix & Auto-Ordner";
+        const VERSION = "4.2.0 - Ordner-Verschiebung & Vorschläge";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dashboard');
@@ -1369,6 +1369,7 @@
                 rechnungsnummer: dokument.rechnungsnummer || '',
                 kategorie: dokument.kategorie || 'Sonstiges',
                 beschreibung: dokument.beschreibung || '',
+                ordner: dokument.ordner || '', // NEU
             });
 
             const faellig = dokument.faelligkeitsdatum || dokument.faelligAm;
@@ -1579,15 +1580,34 @@
                                             onChange={(e) => setEditData({...editData, kategorie: e.target.value})}
                                             className="w-full p-2 border rounded"
                                         >
-                                            <option value="Steuer">Steuer</option>
-                                            <option value="Treibstoff">Treibstoff</option>
-                                            <option value="Versicherung">Versicherung</option>
-                                            <option value="Reparatur">Reparatur</option>
-                                            <option value="Miete">Miete</option>
-                                            <option value="Telekom">Telekom</option>
-                                            <option value="Strom">Strom</option>
-                                            <option value="Sonstiges">Sonstiges</option>
+                                            <option value="Steuer">🏛️ Steuer</option>
+                                            <option value="Finanzierung">🏦 Finanzierung</option>
+                                            <option value="Treibstoff">⛽ Treibstoff</option>
+                                            <option value="Versicherung">🛡️ Versicherung</option>
+                                            <option value="Reparatur">🔧 Reparatur</option>
+                                            <option value="Miete">🏠 Miete</option>
+                                            <option value="Telekom">📱 Telekom</option>
+                                            <option value="Strom">⚡ Strom</option>
+                                            <option value="Sonstiges">💰 Sonstiges</option>
                                         </select>
+                                    </div>
+                                    
+                                    {/* NEU: Ordner-Auswahl */}
+                                    <div>
+                                        <label className="block text-sm font-medium mb-1">📁 Ordner zuweisen</label>
+                                        <select
+                                            value={editData.ordner || ''}
+                                            onChange={(e) => setEditData({...editData, ordner: e.target.value})}
+                                            className="w-full p-2 border rounded"
+                                        >
+                                            <option value="">-- Kein Ordner --</option>
+                                            {ordner.map(ord => (
+                                                <option key={ord} value={ord}>{ord}</option>
+                                            ))}
+                                        </select>
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            💡 Ordner helfen bei der Organisation. Erstelle neue mit dem ➕ Button in der Sidebar.
+                                        </p>
                                     </div>
                                     
                                     <div>
