@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "4.2.0 - Ordner-Verschiebung & Vorschläge";
+        const VERSION = "4.4.0 - Aktions-Dashboard";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dashboard');
@@ -897,6 +897,8 @@
                                 stats={stats} 
                                 dokumente={dokumente}
                                 version={VERSION}
+                                updateStatus={updateStatus}
+                                setSelectedDokument={setSelectedDokument}
                             />
                         )}
                         
@@ -941,7 +943,7 @@
             );
         }
 
-        function Dashboard({ stats, dokumente, version }) {
+        function Dashboard({ stats, dokumente, version, updateStatus, setSelectedDokument }) {
             const aktuellerMonat = new Date().getMonth();
             const aktuellesJahr = new Date().getFullYear();
             const monatsDokumente = dokumente.filter(d => {
@@ -1085,6 +1087,105 @@
                         </div>
                     </div>
 
+                    {/* HEUTE FÄLLIG */}
+                    {faelligHeute.length > 0 && (
+                        <div className="bg-red-50 border-l-4 border-red-600 rounded-lg shadow-lg p-6">
+                            <h3 className="text-xl font-bold text-red-800 mb-4 flex items-center gap-2">
+                                🔥 HEUTE FÄLLIG - {faelligHeute.length} Aufgabe{faelligHeute.length > 1 ? 'n' : ''} ({summeHeute.toFixed(2)} €)
+                            </h3>
+                            <div className="space-y-3">
+                                {faelligHeute.map(dok => (
+                                    <div key={dok.id} className="bg-white p-4 rounded-lg flex gap-4 items-start hover:shadow-md transition">
+                                        {dok.thumbnail && (
+                                            <img 
+                                                src={dok.thumbnail} 
+                                                alt="Preview" 
+                                                className="w-16 h-20 object-cover rounded border cursor-pointer hover:scale-105 transition"
+                                                onClick={() => setSelectedDokument(dok)}
+                                            />
+                                        )}
+                                        
+                                        <div className="flex-1">
+                                            <p className="font-semibold text-lg">{dok.beschreibung || dok.absender}</p>
+                                            <div className="flex gap-2 mt-1 text-sm text-gray-600">
+                                                <span>💰 {parseFloat(dok.betrag || 0).toFixed(2)} €</span>
+                                                <span>•</span>
+                                                <span>📅 Fällig: HEUTE</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <div className="flex gap-2">
+                                            <button 
+                                                onClick={() => updateStatus(dok.id, 'bezahlt')}
+                                                className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-semibold"
+                                                title="Als bezahlt markieren"
+                                            >
+                                                ✅ Bezahlt
+                                            </button>
+                                            <button 
+                                                onClick={() => setSelectedDokument(dok)}
+                                                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
+                                                title="PDF ansehen"
+                                            >
+                                                👁️
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                    
+                    {/* DIESE WOCHE FÄLLIG */}
+                    {faelligWoche.length > 0 && (
+                        <div className="bg-yellow-50 border-l-4 border-yellow-500 rounded-lg shadow-lg p-6">
+                            <h3 className="text-xl font-bold text-yellow-800 mb-4">
+                                ⚠️ DIESE WOCHE - {faelligWoche.length} Aufgabe{faelligWoche.length > 1 ? 'n' : ''} ({summeWoche.toFixed(2)} €)
+                            </h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {faelligWoche.slice(0, 6).map(dok => {
+                                    const faellig = dok.faelligkeitsdatum || dok.faelligAm;
+                                    const tageNoch = Math.ceil((new Date(faellig) - heute) / (1000 * 60 * 60 * 24));
+                                    return (
+                                        <div key={dok.id} className="bg-white p-3 rounded flex gap-3 items-center hover:shadow-md transition">
+                                            {dok.thumbnail && (
+                                                <img 
+                                                    src={dok.thumbnail} 
+                                                    alt="Preview" 
+                                                    className="w-12 h-16 object-cover rounded border cursor-pointer"
+                                                    onClick={() => setSelectedDokument(dok)}
+                                                />
+                                            )}
+                                            <div className="flex-1 min-w-0">
+                                                <p className="font-semibold text-sm truncate">{dok.beschreibung || dok.absender}</p>
+                                                <div className="flex justify-between items-center mt-1">
+                                                    <span className="text-sm text-gray-600">{parseFloat(dok.betrag || 0).toFixed(2)} €</span>
+                                                    <span className="text-xs bg-yellow-200 px-2 py-1 rounded">in {tageNoch} Tag{tageNoch > 1 ? 'en' : ''}</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex flex-col gap-1">
+                                                <button 
+                                                    onClick={() => updateStatus(dok.id, 'bezahlt')}
+                                                    className="px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-xs"
+                                                    title="Bezahlt"
+                                                >
+                                                    ✅
+                                                </button>
+                                                <button 
+                                                    onClick={() => setSelectedDokument(dok)}
+                                                    className="px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs"
+                                                    title="Ansehen"
+                                                >
+                                                    👁️
+                                                </button>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    )}
+
                     {/* Dringende Dokumente */}
                     {hochprioDokumente.length > 0 && (
                         <div className="bg-white rounded-lg shadow-md p-6">
@@ -1094,18 +1195,52 @@
                                     const faellig = dok.faelligkeitsdatum || dok.faelligAm;
                                     const istUeberfaellig = faellig && new Date(faellig) < new Date();
                                     return (
-                                        <div key={dok.id} className={`flex justify-between items-center p-3 rounded ${istUeberfaellig ? 'bg-red-50 border-l-4 border-red-600' : 'bg-yellow-50 border-l-4 border-yellow-500'}`}>
-                                            <div>
-                                                <p className="font-semibold">{dok.beschreibung || dok.absender}</p>
-                                                <p className="text-sm text-gray-600">
-                                                    {dok.betrag ? `${parseFloat(dok.betrag).toFixed(2)} €` : ''} • {new Date(dok.datum).toLocaleDateString('de-DE')}
-                                                    {faellig && ` • Fällig: ${new Date(faellig).toLocaleDateString('de-DE')}`}
-                                                    {istUeberfaellig && <span className="ml-2 text-red-600 font-bold">⚠️ ÜBERFÄLLIG</span>}
-                                                </p>
+                                        <div key={dok.id} className={`flex gap-4 items-start p-4 rounded hover:shadow-md transition ${istUeberfaellig ? 'bg-red-50 border-l-4 border-red-600' : 'bg-yellow-50 border-l-4 border-yellow-500'}`}>
+                                            {/* Thumbnail */}
+                                            {dok.thumbnail && (
+                                                <img 
+                                                    src={dok.thumbnail} 
+                                                    alt="Preview" 
+                                                    className="w-16 h-20 object-cover rounded border cursor-pointer hover:scale-105 transition"
+                                                    onClick={() => setSelectedDokument(dok)}
+                                                />
+                                            )}
+                                            
+                                            {/* Info */}
+                                            <div className="flex-1">
+                                                <p className="font-semibold text-lg">{dok.beschreibung || dok.absender}</p>
+                                                <div className="flex gap-2 mt-1 text-sm text-gray-600">
+                                                    <span>💰 {dok.betrag ? `${parseFloat(dok.betrag).toFixed(2)} €` : '-'}</span>
+                                                    <span>•</span>
+                                                    <span>📅 {new Date(dok.datum).toLocaleDateString('de-DE')}</span>
+                                                    {faellig && (
+                                                        <>
+                                                            <span>•</span>
+                                                            <span className={istUeberfaellig ? 'text-red-600 font-bold' : ''}>
+                                                                {istUeberfaellig ? '⚠️ ÜBERFÄLLIG' : 'Fällig'}: {new Date(faellig).toLocaleDateString('de-DE')}
+                                                            </span>
+                                                        </>
+                                                    )}
+                                                </div>
                                             </div>
-                                            <span className={`px-3 py-1 rounded text-sm font-medium status-${dok.status}`}>
-                                                {dok.status}
-                                            </span>
+                                            
+                                            {/* Action Buttons */}
+                                            <div className="flex gap-2">
+                                                <button 
+                                                    onClick={() => updateStatus(dok.id, 'bezahlt')}
+                                                    className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-semibold whitespace-nowrap"
+                                                    title="Als bezahlt markieren"
+                                                >
+                                                    ✅ Bezahlt
+                                                </button>
+                                                <button 
+                                                    onClick={() => setSelectedDokument(dok)}
+                                                    className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm whitespace-nowrap"
+                                                    title="PDF ansehen"
+                                                >
+                                                    👁️ Ansehen
+                                                </button>
+                                            </div>
                                         </div>
                                     );
                                 })}
@@ -1713,7 +1848,9 @@
 
         function KategorieVorschlagModal({ vorschlag, onAccept, onReject, customOrdner }) {
             const [selectedKategorie, setSelectedKategorie] = useState(vorschlag.kategorieVorschlaege[0]?.kategorie || 'Sonstiges');
-            const [selectedOrdner, setSelectedOrdner] = useState(''); // NEU
+            const [selectedOrdner, setSelectedOrdner] = useState('');
+            const [neuerOrdner, setNeuerOrdner] = useState(''); // NEU: Für neuen Ordner
+            const [erstelleNeuenOrdner, setErstelleNeuenOrdner] = useState(false); // NEU: Toggle
             
             const kategorieIcons = {
                 'Versicherung': '🛡️',
@@ -1727,18 +1864,41 @@
                 'Sonstiges': '💰'
             };
             
-            // NEU: Ordner-Vorschlag basierend auf Adresse
+            // NEU: Ordner-Vorschlag basierend auf Adresse ODER Absender
             useEffect(() => {
                 const ordnerConfig = JSON.parse(localStorage.getItem('ordnerConfig') || '{}');
                 const volltext = (vorschlag.volltext || '').toLowerCase();
                 
+                // Prüfe Custom-Ordner (mit Adresse)
                 for (const [ordnerName, config] of Object.entries(ordnerConfig)) {
                     if (config.adresse && volltext.includes(config.adresse.toLowerCase())) {
                         setSelectedOrdner(ordnerName);
-                        break;
+                        return;
                     }
                 }
+                
+                // NEU: Schlage vor, Absender als Ordner zu erstellen
+                if (vorschlag.absender && vorschlag.absender !== 'Unbekannt') {
+                    setNeuerOrdner(vorschlag.absender);
+                    setErstelleNeuenOrdner(true);
+                }
             }, [vorschlag]);
+            
+            // NEU: Ordner erstellen Funktion
+            const handleOrdnerErstellen = () => {
+                if (neuerOrdner.trim()) {
+                    // Speichere in localStorage
+                    const ordnerConfig = JSON.parse(localStorage.getItem('ordnerConfig') || '{}');
+                    ordnerConfig[neuerOrdner.trim()] = {
+                        adresse: '',
+                        erstellt: new Date().toISOString()
+                    };
+                    localStorage.setItem('ordnerConfig', JSON.stringify(ordnerConfig));
+                    setSelectedOrdner(neuerOrdner.trim());
+                    setErstelleNeuenOrdner(false);
+                }
+            };
+            
             
             return (
                 <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
@@ -1808,10 +1968,43 @@
                         <div className="mb-6">
                             <h3 className="font-semibold text-lg text-gray-800 mb-3">📁 Ordner zuweisen:</h3>
                             
-                            {selectedOrdner && (
+                            {/* NEU: Neuen Ordner erstellen Vorschlag */}
+                            {erstelleNeuenOrdner && neuerOrdner && (
+                                <div className="bg-blue-50 border-2 border-blue-500 p-4 rounded-lg mb-3">
+                                    <p className="text-sm text-blue-800 mb-2">
+                                        <strong>✨ Neuen Ordner erstellen?</strong>
+                                    </p>
+                                    <div className="flex gap-2 items-center">
+                                        <input
+                                            type="text"
+                                            value={neuerOrdner}
+                                            onChange={(e) => setNeuerOrdner(e.target.value)}
+                                            className="flex-1 p-2 border rounded"
+                                            placeholder="Ordner-Name"
+                                        />
+                                        <button
+                                            onClick={handleOrdnerErstellen}
+                                            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                                        >
+                                            ➕ Erstellen
+                                        </button>
+                                        <button
+                                            onClick={() => setErstelleNeuenOrdner(false)}
+                                            className="px-4 py-2 bg-gray-300 text-gray-800 rounded hover:bg-gray-400"
+                                        >
+                                            ❌
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-blue-600 mt-2">
+                                        💡 Der Absender "{neuerOrdner}" wird als neuer Ordner vorgeschlagen
+                                    </p>
+                                </div>
+                            )}
+                            
+                            {selectedOrdner && !erstelleNeuenOrdner && (
                                 <div className="bg-green-50 border-2 border-green-500 p-3 rounded-lg mb-3">
                                     <p className="text-sm text-green-800">
-                                        ✨ <strong>Vorschlag:</strong> "{selectedOrdner}" (Adresse erkannt im Text)
+                                        ✨ <strong>Gewählt:</strong> "{selectedOrdner}"
                                     </p>
                                 </div>
                             )}
@@ -1820,6 +2013,7 @@
                                 value={selectedOrdner}
                                 onChange={(e) => setSelectedOrdner(e.target.value)}
                                 className="w-full p-2 border rounded-lg"
+                                disabled={erstelleNeuenOrdner}
                             >
                                 <option value="">-- Kein Ordner --</option>
                                 {customOrdner && customOrdner.map(ord => (
@@ -1827,10 +2021,16 @@
                                 ))}
                             </select>
                             
-                            {customOrdner.length === 0 && (
-                                <p className="text-xs text-gray-500 mt-2">
-                                    💡 Tipp: Erstelle Ordner mit dem ➕ Button in der Sidebar
-                                </p>
+                            {!erstelleNeuenOrdner && (
+                                <button
+                                    onClick={() => {
+                                        setErstelleNeuenOrdner(true);
+                                        setNeuerOrdner(vorschlag.absender || '');
+                                    }}
+                                    className="mt-2 text-sm text-blue-600 hover:underline"
+                                >
+                                    ➕ Neuen Ordner aus Absender erstellen
+                                </button>
                             )}
                         </div>
                         
