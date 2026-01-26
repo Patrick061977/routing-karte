@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "6.0.0 - FINAL: Upload-Vorschau + Ordner FIX + Kategorien";
+        const VERSION = "6.1.0 - Mit Cleanup-Button & Ordner-Verwaltung";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
@@ -126,6 +126,7 @@
             const [kategorieVorschlag, setKategorieVorschlag] = useState(null);
             const [dublettenWarnung, setDublettenWarnung] = useState(null);
             const [customOrdner, setCustomOrdner] = useState([]); // NEU: Benutzerdefinierte Ordner
+            const [showCleanupModal, setShowCleanupModal] = useState(false); // NEU: Cleanup Modal
 
             useEffect(() => {
                 loadData();
@@ -824,6 +825,39 @@
                 }
                 
                 await loadData();
+            }
+            
+            // NEU: Ordner bereinigen
+            function cleanupOrdner() {
+                const ordnerConfig = JSON.parse(localStorage.getItem('ordnerConfig') || '{}');
+                const vorher = Object.keys(ordnerConfig).length;
+                
+                const cleaned = {};
+                const geloescht = [];
+                
+                Object.keys(ordnerConfig).forEach(name => {
+                    // Filter: Gute Ordner behalten
+                    if (name.length >= 5 && 
+                        name.length <= 50 && 
+                        !name.toLowerCase().includes('finanzierungs') &&
+                        name.match(/[A-ZÄÖÜa-zäöüß]{3,}/)) {
+                        cleaned[name] = ordnerConfig[name];
+                    } else {
+                        geloescht.push(name);
+                    }
+                });
+                
+                // Speichere bereinigte Config
+                localStorage.setItem('ordnerConfig', JSON.stringify(cleaned));
+                
+                const nachher = Object.keys(cleaned).length;
+                console.log(`🧹 Cleanup: ${vorher} → ${nachher} (${geloescht.length} gelöscht)`);
+                
+                // Seite neu laden
+                loadData();
+                setShowCleanupModal(false);
+                
+                return { vorher, nachher, geloescht };
             }
             
             // NEU: KI-Regel lernen
