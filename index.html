@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "6.4.1 - DATENBANK-CLEANUP (FIX)";
+        const VERSION = "6.5.0 - Ordner löschen [🗑️] + Verbesserter Cleanup [🔧]";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
@@ -1700,17 +1700,33 @@
                                                 if (!alterAbsender || alterAbsender === 'Unbekannt') continue;
                                                 
                                                 let neuerAbsender = alterAbsender;
-                                                if (neuerAbsender.length > 40) {
-                                                    const words = neuerAbsender.split(/\s+/);
-                                                    neuerAbsender = words.slice(0, 3).join(' ');
+                                                
+                                                // NEU: Erkennt Müll-Absender und setzt zu "Unbekannt"
+                                                if (neuerAbsender.match(/^[^a-zA-ZäöüÄÖÜß]*[a-zA-ZäöüÄÖÜß]{0,2}[^a-zA-ZäöüÄÖÜß]*$/) || 
+                                                    neuerAbsender.match(/^[\d\.\-\/\s]+/) ||
+                                                    neuerAbsender.includes('e.0n') ||
+                                                    neuerAbsender.match(/^[\d\/\-\.\s]+$/)) {
+                                                    neuerAbsender = 'Unbekannt';
+                                                } else {
+                                                    // Zu lang? Kürzen
+                                                    if (neuerAbsender.length > 40) {
+                                                        const words = neuerAbsender.split(/\s+/);
+                                                        neuerAbsender = words.slice(0, 3).join(' ');
+                                                    }
+                                                    
+                                                    // Gerichtsvollzieher Pattern
+                                                    const gvMatch = neuerAbsender.match(/Obergerichtsvollzieherin?\s+.*?([A-ZÄÖÜ][a-zäöüß]+\s+[A-ZÄÖÜ][a-zäöüß]+)/);
+                                                    if (gvMatch) neuerAbsender = gvMatch[1];
+                                                    
+                                                    // Entferne spezifische Suffixe
+                                                    neuerAbsender = neuerAbsender.replace(/\s+Sachgebiet.*$/, '');
+                                                    neuerAbsender = neuerAbsender.replace(/\s+Ihr Fels.*$/, '');
+                                                    neuerAbsender = neuerAbsender.replace(/\s+Holunderweg.*$/, '');
+                                                    
+                                                    // Entferne Punkte/Whitespace am Ende
+                                                    neuerAbsender = neuerAbsender.replace(/[\s\.]+$/, '');
+                                                    neuerAbsender = neuerAbsender.trim();
                                                 }
-                                                
-                                                const gvMatch = neuerAbsender.match(/Obergerichtsvollzieherin?\s+(?:Holunderweg\s+\d+\s+)?([A-ZÄÖÜ][a-zäöüß]+\s+[A-ZÄÖÜ][a-zäöüß]+)/);
-                                                if (gvMatch) neuerAbsender = gvMatch[1];
-                                                
-                                                neuerAbsender = neuerAbsender.replace(/\s+Sachgebiet.*$/, '');
-                                                neuerAbsender = neuerAbsender.replace(/\s+Ihr Fels.*$/, '');
-                                                neuerAbsender = neuerAbsender.trim();
                                                 
                                                 if (neuerAbsender !== alterAbsender) {
                                                     await db.collection('dokumente').doc(doc.id).update({
@@ -1793,21 +1809,47 @@
                                 const count = dokumente.filter(d => d.absender === ord || d.lieferant === ord).length;
                                 const offeneCount = dokumente.filter(d => (d.absender === ord || d.lieferant === ord) && d.status === 'offen').length;
                                 return (
-                                    <button
-                                        key={ord}
-                                        onClick={() => setSelectedOrdner(ord)}
-                                        className={`w-full text-left px-3 py-2 rounded text-sm ${selectedOrdner === ord ? 'folder-active font-semibold' : 'hover:bg-gray-100'}`}
-                                    >
-                                        <div className="flex justify-between items-center">
-                                            <span className="truncate text-xs">📄 {ord}</span>
-                                            <div className="flex gap-1">
-                                                <span className="bg-gray-200 px-1.5 py-0.5 rounded text-xs">{count}</span>
-                                                {offeneCount > 0 && (
-                                                    <span className="bg-red-500 text-white px-1.5 py-0.5 rounded text-xs">{offeneCount}</span>
-                                                )}
+                                    <div key={ord} className="flex items-center gap-1">
+                                        <button
+                                            onClick={() => setSelectedOrdner(ord)}
+                                            className={`flex-1 text-left px-3 py-2 rounded text-sm ${selectedOrdner === ord ? 'folder-active font-semibold' : 'hover:bg-gray-100'}`}
+                                        >
+                                            <div className="flex justify-between items-center">
+                                                <span className="truncate text-xs">📄 {ord}</span>
+                                                <div className="flex gap-1">
+                                                    <span className="bg-gray-200 px-1.5 py-0.5 rounded text-xs">{count}</span>
+                                                    {offeneCount > 0 && (
+                                                        <span className="bg-red-500 text-white px-1.5 py-0.5 rounded text-xs">{offeneCount}</span>
+                                                    )}
+                                                </div>
                                             </div>
-                                        </div>
-                                    </button>
+                                        </button>
+                                        <button
+                                            onClick={async (e) => {
+                                                e.stopPropagation();
+                                                if (!confirm(`🗑️ Ordner "${ord}" löschen?\n\nDas ändert alle Dokumente in diesem Ordner zu:\nAbsender: "Unbekannt"\n\n${count} Dokument(e) betroffen.\n\nFortfahren?`)) return;
+                                                
+                                                try {
+                                                    const docsToUpdate = dokumente.filter(d => d.absender === ord || d.lieferant === ord);
+                                                    for (const doc of docsToUpdate) {
+                                                        await db.collection('dokumente').doc(doc.id).update({
+                                                            absender: 'Unbekannt',
+                                                            lieferant: 'Unbekannt'
+                                                        });
+                                                    }
+                                                    alert(`✅ Ordner "${ord}" gelöscht!\n\n${docsToUpdate.length} Dokumente aktualisiert.`);
+                                                    window.location.reload();
+                                                } catch (error) {
+                                                    console.error('Fehler:', error);
+                                                    alert('❌ Fehler beim Löschen!');
+                                                }
+                                            }}
+                                            className="px-2 py-1 text-red-600 hover:bg-red-50 rounded text-xs"
+                                            title={`Ordner "${ord}" löschen`}
+                                        >
+                                            🗑️
+                                        </button>
+                                    </div>
                                 );
                             })}
                         </div>
