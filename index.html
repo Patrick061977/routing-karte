@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "6.7.0 - Hover-Fix + Drag & Drop Dokumente!";
+        const VERSION = "6.7.1 - Hover + Drag & Drop (FIX)";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
@@ -1141,6 +1141,10 @@
                                 setKategorieVorschlag={setKategorieVorschlag}
                                 dublettenWarnung={dublettenWarnung}
                                 setDublettenWarnung={setDublettenWarnung}
+                                hoverPreview={hoverPreview}
+                                setHoverPreview={setHoverPreview}
+                                draggedDoc={draggedDoc}
+                                setDraggedDoc={setDraggedDoc}
                             />
                         )}
                         
@@ -1670,7 +1674,7 @@
             );
         }
 
-        function DokumenteView({ dokumente, ordner, selectedOrdner, setSelectedOrdner, searchTerm, setSearchTerm, statusFilter, setStatusFilter, sortBy, setSortBy, sortOrder, setSortOrder, updateStatus, updateDokument, deleteDokument, handleFileUpload, uploading, uploadProgress, selectedDokument, setSelectedDokument, kategorieVorschlag, setKategorieVorschlag, dublettenWarnung, setDublettenWarnung }) {
+        function DokumenteView({ dokumente, ordner, selectedOrdner, setSelectedOrdner, searchTerm, setSearchTerm, statusFilter, setStatusFilter, sortBy, setSortBy, sortOrder, setSortOrder, updateStatus, updateDokument, deleteDokument, handleFileUpload, uploading, uploadProgress, selectedDokument, setSelectedDokument, kategorieVorschlag, setKategorieVorschlag, dublettenWarnung, setDublettenWarnung, hoverPreview, setHoverPreview, draggedDoc, setDraggedDoc }) {
             const filteredDokumente = dokumente.filter(dok => {
                 const matchOrdner = selectedOrdner === 'alle' || 
                     dok.ordner === selectedOrdner || 
