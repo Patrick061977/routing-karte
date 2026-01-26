@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "6.1.0 - Mit Cleanup-Button & Ordner-Verwaltung";
+        const VERSION = "6.3.0 - Mit CLEANUP-BUTTON (🧹) in Sidebar!";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
@@ -1604,9 +1604,32 @@
                     <div className="w-64 bg-white rounded-lg shadow-md p-4 h-fit">
                         <div className="flex justify-between items-center mb-3">
                             <h2 className="font-bold text-gray-800">📁 Ordner</h2>
-                            <button
-                                onClick={() => {
-                                    const name = prompt('📁 Neuer Ordner:\n\nName:');
+                            <div className="flex gap-1">
+                                <button
+                                    onClick={() => {
+                                        if (confirm('🧹 Müll-Ordner bereinigen?\n\nLöscht alle Ordner mit:\n- Weniger als 5 Zeichen\n- Mehr als 50 Zeichen\n- "Finanzierungs-Nr..." Namen\n\nFortfahren?')) {
+                                            const ordnerConfig = JSON.parse(localStorage.getItem('ordnerConfig') || '{}');
+                                            const vorher = Object.keys(ordnerConfig).length;
+                                            const cleaned = {};
+                                            Object.keys(ordnerConfig).forEach(name => {
+                                                if (name.length >= 5 && name.length <= 50 && !name.toLowerCase().includes('finanzierungs') && name.match(/[A-ZÄÖÜa-zäöüß]{3,}/)) {
+                                                    cleaned[name] = ordnerConfig[name];
+                                                }
+                                            });
+                                            localStorage.setItem('ordnerConfig', JSON.stringify(cleaned));
+                                            const nachher = Object.keys(cleaned).length;
+                                            alert('✅ Bereinigung abgeschlossen!\n\nVorher: ' + vorher + ' Ordner\nNachher: ' + nachher + ' Ordner\nGelöscht: ' + (vorher - nachher));
+                                            window.location.reload();
+                                        }
+                                    }}
+                                    className="text-xs px-2 py-1 bg-orange-500 text-white rounded hover:bg-orange-600"
+                                    title="Müll-Ordner bereinigen"
+                                >
+                                    🧹
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        const name = prompt('📁 Neuer Ordner:\n\nName:');
                                     if (name && name.trim()) {
                                         const adresse = prompt('📍 Adresse für "' + name + '":\n\n(Optional - für automatische Zuordnung)');
                                         // Speichere Ordner-Konfiguration
@@ -1625,6 +1648,7 @@
                             >
                                 ➕
                             </button>
+                            </div>
                         </div>
                         
                         <button
