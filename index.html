@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "6.5.0 - Ordner löschen [🗑️] + Verbesserter Cleanup [🔧]";
+        const VERSION = "6.6.0 - Hover-Vorschau auf Thumbnails!";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
@@ -1311,12 +1311,24 @@
                                 {faelligHeute.map(dok => (
                                     <div key={dok.id} className="bg-white p-4 rounded-lg flex gap-4 items-start hover:shadow-md transition">
                                         {dok.thumbnail && (
-                                            <img 
-                                                src={dok.thumbnail} 
-                                                alt="Preview" 
-                                                className="w-16 h-20 object-cover rounded border cursor-pointer hover:scale-105 transition"
-                                                onClick={() => setSelectedDokument(dok)}
-                                            />
+                                            <div className="relative group">
+                                                <img 
+                                                    src={dok.thumbnail} 
+                                                    alt="Preview" 
+                                                    className="w-16 h-20 object-cover rounded border cursor-pointer transition"
+                                                    onClick={() => setSelectedDokument(dok)}
+                                                />
+                                                <div className="hidden group-hover:block absolute left-full ml-2 top-0 z-50 pointer-events-none">
+                                                    <div className="bg-white rounded-lg shadow-2xl border-2 border-blue-500 p-2">
+                                                        <img 
+                                                            src={dok.thumbnail} 
+                                                            alt="Große Vorschau" 
+                                                            className="w-80 rounded"
+                                                            style={{maxHeight: '500px', objectFit: 'contain'}}
+                                                        />
+                                                    </div>
+                                                </div>
+                                            </div>
                                         )}
                                         
                                         <div className="flex-1">
