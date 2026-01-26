@@ -104,10 +104,10 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "5.1.0 - Intelligente Absender-Erkennung";
+        const VERSION = "5.2.0 - Ordner-Filter FIX & localStorage Cleanup";
 
         function BuchhaltungApp() {
-            const [activeTab, setActiveTab] = useState('dashboard');
+            const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
             const [dokumente, setDokumente] = useState([]);
             const [ordner, setOrdner] = useState([]);
             const [selectedOrdner, setSelectedOrdner] = useState('alle');
