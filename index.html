@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "6.6.0 - Hover-Vorschau auf Thumbnails!";
+        const VERSION = "6.7.0 - Hover-Fix + Drag & Drop Dokumente!";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
@@ -115,6 +115,8 @@
             const [uploading, setUploading] = useState(false);
             const [uploadProgress, setUploadProgress] = useState({ current: 0, total: 0, file: '', status: '' });
             const [selectedDokument, setSelectedDokument] = useState(null);
+            const [hoverPreview, setHoverPreview] = useState(null); // NEU: { thumbnail, dokId }
+            const [draggedDoc, setDraggedDoc] = useState(null); // NEU: Drag & Drop
             const [searchTerm, setSearchTerm] = useState('');
             const [statusFilter, setStatusFilter] = useState('alle');
             const [sortBy, setSortBy] = useState('datum');
@@ -1311,23 +1313,23 @@
                                 {faelligHeute.map(dok => (
                                     <div key={dok.id} className="bg-white p-4 rounded-lg flex gap-4 items-start hover:shadow-md transition">
                                         {dok.thumbnail && (
-                                            <div className="relative group">
+                                            <div 
+                                                className="relative cursor-move"
+                                                draggable="true"
+                                                onDragStart={(e) => {
+                                                    setDraggedDoc(dok);
+                                                    e.dataTransfer.effectAllowed = 'move';
+                                                }}
+                                                onDragEnd={() => setDraggedDoc(null)}
+                                            >
                                                 <img 
                                                     src={dok.thumbnail} 
                                                     alt="Preview" 
-                                                    className="w-16 h-20 object-cover rounded border cursor-pointer transition"
+                                                    className="w-16 h-20 object-cover rounded border cursor-pointer transition hover:scale-105"
                                                     onClick={() => setSelectedDokument(dok)}
+                                                    onMouseEnter={() => setHoverPreview({ thumbnail: dok.thumbnail, dokId: dok.id })}
+                                                    onMouseLeave={() => setHoverPreview(null)}
                                                 />
-                                                <div className="hidden group-hover:block absolute left-full ml-2 top-0 z-50 pointer-events-none">
-                                                    <div className="bg-white rounded-lg shadow-2xl border-2 border-blue-500 p-2">
-                                                        <img 
-                                                            src={dok.thumbnail} 
-                                                            alt="Große Vorschau" 
-                                                            className="w-80 rounded"
-                                                            style={{maxHeight: '500px', objectFit: 'contain'}}
-                                                        />
-                                                    </div>
-                                                </div>
                                             </div>
                                         )}
                                         
@@ -1824,7 +1826,33 @@
                                     <div key={ord} className="flex items-center gap-1">
                                         <button
                                             onClick={() => setSelectedOrdner(ord)}
-                                            className={`flex-1 text-left px-3 py-2 rounded text-sm ${selectedOrdner === ord ? 'folder-active font-semibold' : 'hover:bg-gray-100'}`}
+                                            onDragOver={(e) => {
+                                                e.preventDefault();
+                                                e.currentTarget.classList.add('drag-over');
+                                            }}
+                                            onDragLeave={(e) => {
+                                                e.currentTarget.classList.remove('drag-over');
+                                            }}
+                                            onDrop={async (e) => {
+                                                e.preventDefault();
+                                                e.currentTarget.classList.remove('drag-over');
+                                                if (!draggedDoc) return;
+                                                
+                                                if (confirm(`📁 Dokument "${draggedDoc.dateiname}" nach "${ord}" verschieben?`)) {
+                                                    try {
+                                                        await db.collection('dokumente').doc(draggedDoc.id).update({
+                                                            absender: ord,
+                                                            lieferant: ord
+                                                        });
+                                                        alert('✅ Dokument verschoben!');
+                                                        window.location.reload();
+                                                    } catch (error) {
+                                                        console.error('Fehler:', error);
+                                                        alert('❌ Fehler beim Verschieben!');
+                                                    }
+                                                }
+                                            }}
+                                            className={`flex-1 text-left px-3 py-2 rounded text-sm transition-all ${selectedOrdner === ord ? 'folder-active font-semibold' : 'hover:bg-gray-100'}`}
                                         >
                                             <div className="flex justify-between items-center">
                                                 <span className="truncate text-xs">📄 {ord}</span>
@@ -1943,6 +1971,27 @@
                     {/* PDF Viewer */}
                     {selectedDokument && (
                         <PDFViewer dokument={selectedDokument} onClose={() => setSelectedDokument(null)} />
+                    )}
+                    
+                    {/* NEU: Hover-Vorschau */}
+                    {hoverPreview && (
+                        <div 
+                            className="fixed z-50 pointer-events-none"
+                            style={{
+                                left: '50%',
+                                top: '50%',
+                                transform: 'translate(-50%, -50%)'
+                            }}
+                        >
+                            <div className="bg-white rounded-lg shadow-2xl border-4 border-blue-500 p-3 animate-fade-in">
+                                <img 
+                                    src={hoverPreview.thumbnail} 
+                                    alt="Vorschau" 
+                                    className="rounded"
+                                    style={{ width: '400px', maxHeight: '600px', objectFit: 'contain' }}
+                                />
+                            </div>
+                        </div>
                     )}
                     
                     {/* NEU: Kategorie-Vorschlag Modal */}
