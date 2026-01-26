@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "6.3.0 - Mit CLEANUP-BUTTON (🧹) in Sidebar!";
+        const VERSION = "6.4.0 - DATENBANK-CLEANUP (Alles sauber machen!)";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
@@ -860,6 +860,82 @@
                 return { vorher, nachher, geloescht };
             }
             
+            // NEU: Datenbank-Cleanup - Korrigiert Absender in ALLEN Dokumenten
+            async function cleanupDatenbank() {
+                if (!confirm('🔧 DATENBANK-CLEANUP\n\nDas korrigiert die Absender-Namen in ALLEN Dokumenten!\n\n⚠️ Kann 1-2 Minuten dauern bei vielen Dokumenten.\n\nFortfahren?')) {
+                    return;
+                }
+                
+                try {
+                    console.log('🔧 Starte Datenbank-Cleanup...');
+                    
+                    // Lade ALLE Dokumente
+                    const snapshot = await db.collection('dokumente').get();
+                    const docs = snapshot.docs;
+                    console.log(`📄 Gefunden: ${docs.length} Dokumente`);
+                    
+                    let geaendert = 0;
+                    let fehler = 0;
+                    
+                    for (const doc of docs) {
+                        const data = doc.data();
+                        const alterAbsender = data.absender;
+                        
+                        if (!alterAbsender || alterAbsender === 'Unbekannt') continue;
+                        
+                        // Bereinige Absender
+                        let neuerAbsender = alterAbsender;
+                        
+                        // Zu lang? Kürzen auf 40 Zeichen
+                        if (neuerAbsender.length > 40) {
+                            const words = neuerAbsender.split(/\s+/);
+                            neuerAbsender = words.slice(0, 3).join(' ');
+                        }
+                        
+                        // Spezifische Patterns
+                        // "Obergerichtsvollzieherin ... Name" → "Name"
+                        const gvMatch = neuerAbsender.match(/Obergerichtsvollzieherin?\s+(?:Holunderweg\s+\d+\s+)?([A-ZÄÖÜ][a-zäöüß]+\s+[A-ZÄÖÜ][a-zäöüß]+)/);
+                        if (gvMatch) {
+                            neuerAbsender = gvMatch[1];
+                        }
+                        
+                        // "Hauptzollamt X Sachgebiet..." → "Hauptzollamt X"
+                        neuerAbsender = neuerAbsender.replace(/\s+Sachgebiet.*$/, '');
+                        
+                        // "X Ihr Fels in der Brandung" → "X"
+                        neuerAbsender = neuerAbsender.replace(/\s+Ihr Fels.*$/, '');
+                        
+                        // Trim
+                        neuerAbsender = neuerAbsender.trim();
+                        
+                        // Hat sich was geändert?
+                        if (neuerAbsender !== alterAbsender) {
+                            try {
+                                await db.collection('dokumente').doc(doc.id).update({
+                                    absender: neuerAbsender,
+                                    lieferant: neuerAbsender
+                                });
+                                console.log(`✅ ${alterAbsender} → ${neuerAbsender}`);
+                                geaendert++;
+                            } catch (err) {
+                                console.error(`❌ Fehler bei ${doc.id}:`, err);
+                                fehler++;
+                            }
+                        }
+                    }
+                    
+                    console.log(`🎉 Cleanup fertig! ${geaendert} Dokumente korrigiert, ${fehler} Fehler`);
+                    alert(`✅ Datenbank-Cleanup abgeschlossen!\n\nDokumente korrigiert: ${geaendert}\nFehler: ${fehler}\n\nSeite wird neu geladen...`);
+                    
+                    // Seite neu laden
+                    window.location.reload();
+                    
+                } catch (error) {
+                    console.error('❌ Cleanup-Fehler:', error);
+                    alert('❌ Fehler beim Cleanup! Siehe Konsole.');
+                }
+            }
+            
             // NEU: KI-Regel lernen
             async function lernKiRegel(typ, trigger, wert) {
                 try {
@@ -1605,6 +1681,13 @@
                         <div className="flex justify-between items-center mb-3">
                             <h2 className="font-bold text-gray-800">📁 Ordner</h2>
                             <div className="flex gap-1">
+                                <button
+                                    onClick={() => cleanupDatenbank()}
+                                    className="text-xs px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700"
+                                    title="Datenbank-Cleanup: Korrigiert Absender in ALLEN Dokumenten"
+                                >
+                                    🔧
+                                </button>
                                 <button
                                     onClick={() => {
                                         if (confirm('🧹 Müll-Ordner bereinigen?\n\nLöscht alle Ordner mit:\n- Weniger als 5 Zeichen\n- Mehr als 50 Zeichen\n- "Finanzierungs-Nr..." Namen\n\nFortfahren?')) {
