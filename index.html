@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "7.0.0 - PDF-Viewer mit Aktionen (Bearbeiten/Verschieben/Löschen)!";
+        const VERSION = "7.1.0 - PDF-Viewer mit Sidebar RECHTS + Dateiname ändern!";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
@@ -2660,40 +2660,71 @@
         function PDFViewer({ dokument, onClose, updateDokument, deleteDokument, ordner }) {
             const [showEditModal, setShowEditModal] = React.useState(false);
             const [showMoveDropdown, setShowMoveDropdown] = React.useState(false);
+            const [autoRename, setAutoRename] = React.useState(true);
+            
+            const kategorieIcons = {
+                'Versicherung': '🛡️', 'Steuer': '🏛️', 'Finanzierung': '🏦',
+                'Treibstoff': '⛽', 'Reparatur': '🔧', 'Miete': '🏠',
+                'Telekom': '📱', 'Strom': '⚡', 'Sonstiges': '💰'
+            };
+            
+            const statusColors = {
+                'offen': 'bg-red-100 text-red-700',
+                'bearbeitet': 'bg-yellow-100 text-yellow-700',
+                'bezahlt': 'bg-green-100 text-green-700',
+                'gebucht': 'bg-blue-100 text-blue-700'
+            };
             
             return (
                 <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4" onClick={onClose}>
-                    <div className="bg-white rounded-lg w-full max-w-6xl h-[90vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex justify-between items-center p-4 border-b bg-gray-50">
-                            <div>
+                    <div className="bg-white rounded-lg w-full max-w-7xl h-[90vh] flex" onClick={(e) => e.stopPropagation()}>
+                        {/* PDF LINKS */}
+                        <div className="flex-1 flex flex-col">
+                            <div className="p-4 border-b bg-gray-50">
                                 <h3 className="font-bold text-lg">{dokument.dateiname}</h3>
                                 {dokument.beschreibung && (
                                     <p className="text-sm text-gray-600">{dokument.beschreibung}</p>
                                 )}
                             </div>
-                            <div className="flex gap-2 items-center">
+                            <div className="flex-1 overflow-hidden bg-gray-100">
+                                <iframe
+                                    src={`${dokument.pdfUrl}#toolbar=1&navpanes=1&scrollbar=1`}
+                                    className="w-full h-full border-0"
+                                    title="PDF Viewer"
+                                />
+                            </div>
+                        </div>
+                        
+                        {/* SIDEBAR RECHTS */}
+                        <div className="w-80 border-l bg-gray-50 flex flex-col overflow-y-auto">
+                            {/* Header mit X */}
+                            <div className="p-4 border-b flex justify-between items-center">
+                                <h3 className="font-bold">📋 Aktionen</h3>
+                                <button onClick={onClose} className="text-2xl font-bold text-gray-600 hover:text-gray-800">✕</button>
+                            </div>
+                            
+                            {/* Action Buttons */}
+                            <div className="p-4 space-y-2 border-b">
                                 <button
                                     onClick={() => setShowEditModal(true)}
-                                    className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
-                                    title="Bearbeiten"
+                                    className="w-full px-4 py-3 bg-blue-600 text-white rounded hover:bg-blue-700 font-semibold"
                                 >
                                     ✏️ Bearbeiten
                                 </button>
                                 <div className="relative">
                                     <button
                                         onClick={() => setShowMoveDropdown(!showMoveDropdown)}
-                                        className="px-3 py-2 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
-                                        title="Verschieben"
+                                        className="w-full px-4 py-3 bg-green-600 text-white rounded hover:bg-green-700 font-semibold"
                                     >
                                         📁 Verschieben
                                     </button>
                                     {showMoveDropdown && (
-                                        <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-xl border z-50 max-h-96 overflow-y-auto">
+                                        <div className="absolute left-0 right-0 mt-2 bg-white rounded-lg shadow-xl border z-50 max-h-64 overflow-y-auto">
                                             {ordner && ordner.map(ord => (
                                                 <button
                                                     key={ord}
                                                     onClick={async () => {
-                                                        if (confirm(`Dokument nach "${ord}" verschieben?`)) {
+                                                        if (confirm(`Nach "${ord}" verschieben?`)) {
                                                             await updateDokument(dokument.id, { absender: ord, lieferant: ord });
                                                             alert('✅ Verschoben!');
                                                             setShowMoveDropdown(false);
@@ -2707,10 +2738,10 @@
                                             ))}
                                             <button
                                                 onClick={() => {
-                                                    const neuerOrdner = prompt('📁 Neuer Ordner:\n\nName:');
-                                                    if (neuerOrdner && neuerOrdner.trim()) {
-                                                        updateDokument(dokument.id, { absender: neuerOrdner.trim(), lieferant: neuerOrdner.trim() });
-                                                        alert('✅ In neuen Ordner verschoben!');
+                                                    const name = prompt('Neuer Ordner:');
+                                                    if (name && name.trim()) {
+                                                        updateDokument(dokument.id, { absender: name.trim(), lieferant: name.trim() });
+                                                        alert('✅ Verschoben!');
                                                         setShowMoveDropdown(false);
                                                         onClose();
                                                     }
@@ -2724,29 +2755,83 @@
                                 </div>
                                 <button
                                     onClick={async () => {
-                                        if (confirm('🗑️ Dokument wirklich löschen?\n\nDies kann nicht rückgängig gemacht werden!')) {
+                                        if (confirm('🗑️ Dokument löschen?')) {
                                             await deleteDokument(dokument.id);
                                             alert('✅ Gelöscht!');
                                             onClose();
                                         }
                                     }}
-                                    className="px-3 py-2 bg-red-600 text-white rounded hover:bg-red-700 text-sm"
-                                    title="Löschen"
+                                    className="w-full px-4 py-3 bg-red-600 text-white rounded hover:bg-red-700 font-semibold"
                                 >
-                                    🗑️
+                                    🗑️ Löschen
                                 </button>
-                                <button
-                                    onClick={onClose}
-                                    className="text-gray-600 hover:text-gray-800 text-3xl font-bold px-3"
-                                >
-                                    ✕
-                                </button>
+                            </div>
+                            
+                            {/* Übersicht */}
+                            <div className="p-4 space-y-3 text-sm">
+                                <h4 className="font-bold text-gray-700 mb-3">📊 ÜBERSICHT</h4>
+                                
+                                <div>
+                                    <div className="text-xs text-gray-500 mb-1">📁 Ordner</div>
+                                    <div className="font-semibold">{dokument.absender || 'Unbekannt'}</div>
+                                </div>
+                                
+                                <div>
+                                    <div className="text-xs text-gray-500 mb-1">📂 Kategorie</div>
+                                    <div className="font-semibold">
+                                        {kategorieIcons[dokument.kategorie] || '💰'} {dokument.kategorie || 'Sonstiges'}
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <div className="text-xs text-gray-500 mb-1">💰 Betrag</div>
+                                    <div className="font-bold text-lg text-blue-600">
+                                        {dokument.betrag ? parseFloat(dokument.betrag).toFixed(2) + ' €' : '-'}
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <div className="text-xs text-gray-500 mb-1">📅 Datum</div>
+                                    <div className="font-semibold">
+                                        {dokument.datum ? new Date(dokument.datum).toLocaleDateString('de-DE') : '-'}
+                                    </div>
+                                </div>
+                                
+                                <div>
+                                    <div className="text-xs text-gray-500 mb-1">🏷️ Status</div>
+                                    <span className={`inline-block px-3 py-1 rounded font-semibold ${statusColors[dokument.status] || 'bg-gray-100'}`}>
+                                        {dokument.status || 'offen'}
+                                    </span>
+                                </div>
+                                
+                                <div>
+                                    <div className="text-xs text-gray-500 mb-1">📄 Dateiname</div>
+                                    <div className="text-xs bg-white p-2 rounded border break-all">
+                                        {dokument.dateiname}
+                                    </div>
+                                </div>
+                                
+                                {dokument.rechnungsnummer && (
+                                    <div>
+                                        <div className="text-xs text-gray-500 mb-1">🔢 Rechnungsnr.</div>
+                                        <div className="font-mono text-xs">{dokument.rechnungsnummer}</div>
+                                    </div>
+                                )}
+                                
+                                {dokument.ocrConfidence && (
+                                    <div>
+                                        <div className="text-xs text-gray-500 mb-1">🤖 OCR Qualität</div>
+                                        <div className="text-xs">{Math.round(dokument.ocrConfidence)}%</div>
+                                    </div>
+                                )}
                             </div>
                         </div>
                         
                         {showEditModal && (
                             <EditModalInViewer 
                                 dokument={dokument} 
+                                autoRename={autoRename}
+                                setAutoRename={setAutoRename}
                                 onSave={async (updates) => {
                                     await updateDokument(dokument.id, updates);
                                     setShowEditModal(false);
@@ -2755,51 +2840,71 @@
                                 onClose={() => setShowEditModal(false)}
                             />
                         )}
-                        
-                        <div className="flex-1 overflow-hidden bg-gray-100">
-                            <iframe
-                                src={`${dokument.pdfUrl}#toolbar=1&navpanes=1&scrollbar=1`}
-                                className="w-full h-full border-0"
-                                title="PDF Viewer"
-                                style={{ minHeight: '600px' }}
-                            />
-                        </div>
-                        
-                        <div className="p-3 border-t bg-gray-50 flex justify-between items-center">
-                            <div className="text-sm text-gray-600">
-                                {dokument.betrag && <span className="font-semibold">{parseFloat(dokument.betrag).toFixed(2)} €</span>}
-                                {dokument.datum && <span className="ml-4">📅 {new Date(dokument.datum).toLocaleDateString('de-DE')}</span>}
-                                {dokument.kategorie && <span className="ml-4 px-2 py-1 bg-blue-100 text-blue-700 rounded text-xs">{dokument.kategorie}</span>}
-                                {dokument.ocrConfidence && <span className="ml-4 px-2 py-1 bg-green-100 text-green-700 rounded text-xs">OCR: {Math.round(dokument.ocrConfidence)}%</span>}
-                            </div>
-                            <a
-                                href={dokument.pdfUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
-                            >
-                                📥 Download
-                            </a>
-                        </div>
                     </div>
                 </div>
             );
         }
 
-        function EditModalInViewer({ dokument, onSave, onClose }) {
+                function EditModalInViewer({ dokument, onSave, onClose, autoRename, setAutoRename }) {
             const [betrag, setBetrag] = React.useState(dokument.betrag || '');
             const [datum, setDatum] = React.useState(dokument.datum || '');
             const [kategorie, setKategorie] = React.useState(dokument.kategorie || 'Sonstiges');
             const [beschreibung, setBeschreibung] = React.useState(dokument.beschreibung || '');
             const [rechnungsnummer, setRechnungsnummer] = React.useState(dokument.rechnungsnummer || '');
+            const [dateiname, setDateiname] = React.useState(dokument.dateiname || '');
+            const [ordner, setOrdner] = React.useState(dokument.absender || '');
+            
+            // Auto-Rename Funktion
+            const generateFilename = () => {
+                if (!autoRename) return;
+                const d = datum ? datum.split('-').reverse().join('-') : 'ohne-datum';
+                const k = kategorie || 'sonstiges';
+                const o = ordner || 'unbekannt';
+                const b = betrag ? parseFloat(betrag).toFixed(2).replace('.', ',') : '0';
+                setDateiname(`${d}_${k}_${o}_${b}€.pdf`);
+            };
+            
+            React.useEffect(() => {
+                generateFilename();
+            }, [datum, kategorie, ordner, betrag, autoRename]);
             
             return (
                 <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onClose}>
-                    <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                    <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                         <h3 className="text-xl font-bold mb-4">✏️ Dokument bearbeiten</h3>
+                        
+                        {/* Auto-Rename Toggle */}
+                        <div className="mb-4 p-3 bg-blue-50 rounded border border-blue-200">
+                            <label className="flex items-center cursor-pointer">
+                                <input
+                                    type="checkbox"
+                                    checked={autoRename}
+                                    onChange={(e) => setAutoRename(e.target.checked)}
+                                    className="mr-2 w-4 h-4"
+                                />
+                                <span className="font-semibold">🤖 Automatische Datei-Benennung</span>
+                            </label>
+                            <p className="text-xs text-gray-600 mt-1">
+                                Format: [Datum]_[Kategorie]_[Ordner]_[Betrag]€.pdf
+                            </p>
+                        </div>
+                        
+                        {/* Dateiname */}
+                        <div className="mb-4">
+                            <label className="block text-sm font-semibold mb-1">📄 Dateiname</label>
+                            <input
+                                type="text"
+                                value={dateiname}
+                                onChange={(e) => setDateiname(e.target.value)}
+                                disabled={autoRename}
+                                className={`w-full px-3 py-2 border rounded ${autoRename ? 'bg-gray-100' : ''}`}
+                                placeholder="Dateiname.pdf"
+                            />
+                        </div>
+                        
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-semibold mb-1">Betrag (€)</label>
+                                <label className="block text-sm font-semibold mb-1">💰 Betrag (€)</label>
                                 <input
                                     type="number"
                                     step="0.01"
@@ -2809,7 +2914,7 @@
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold mb-1">Datum</label>
+                                <label className="block text-sm font-semibold mb-1">📅 Datum</label>
                                 <input
                                     type="date"
                                     value={datum}
@@ -2818,7 +2923,7 @@
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold mb-1">Kategorie</label>
+                                <label className="block text-sm font-semibold mb-1">📂 Kategorie</label>
                                 <select
                                     value={kategorie}
                                     onChange={(e) => setKategorie(e.target.value)}
@@ -2836,7 +2941,16 @@
                                 </select>
                             </div>
                             <div>
-                                <label className="block text-sm font-semibold mb-1">Rechnungsnummer</label>
+                                <label className="block text-sm font-semibold mb-1">📁 Ordner</label>
+                                <input
+                                    type="text"
+                                    value={ordner}
+                                    onChange={(e) => setOrdner(e.target.value)}
+                                    className="w-full px-3 py-2 border rounded"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-semibold mb-1">🔢 Rechnungsnummer</label>
                                 <input
                                     type="text"
                                     value={rechnungsnummer}
@@ -2844,8 +2958,8 @@
                                     className="w-full px-3 py-2 border rounded"
                                 />
                             </div>
-                            <div className="col-span-2">
-                                <label className="block text-sm font-semibold mb-1">Beschreibung</label>
+                            <div>
+                                <label className="block text-sm font-semibold mb-1">📝 Beschreibung</label>
                                 <input
                                     type="text"
                                     value={beschreibung}
@@ -2856,7 +2970,10 @@
                         </div>
                         <div className="flex gap-2 mt-4">
                             <button
-                                onClick={() => onSave({ betrag, datum, kategorie, beschreibung, rechnungsnummer })}
+                                onClick={() => onSave({ 
+                                    betrag, datum, kategorie, beschreibung, rechnungsnummer, 
+                                    dateiname, absender: ordner, lieferant: ordner 
+                                })}
                                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                             >
                                 ✅ Speichern
@@ -2873,7 +2990,7 @@
             );
         }
 
-        function KontierungView({ dokumente, updateDokument }) {
+                function KontierungView({ dokumente, updateDokument }) {
             const ungebuchte = dokumente.filter(d => d.status !== 'gebucht' && !d.konto);
 
             return (
