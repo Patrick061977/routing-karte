@@ -104,7 +104,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "7.0.1 - Enhanced PDF-Viewer (DEBUG)";
+        const VERSION = "7.1.0 - Bearbeiten-Modal mit Absender & Ordner!";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
@@ -2757,6 +2757,7 @@
                         {showEditModal && (
                             <EditModalInViewer 
                                 dokument={dokument} 
+                                ordner={ordner}
                                 onSave={async (updates) => {
                                     console.log('💾 DEBUG: Speichere Änderungen...');
                                     console.log('📄 Dokument ID:', dokument.id);
@@ -2806,12 +2807,13 @@
             );
         }
 
-        function EditModalInViewer({ dokument, onSave, onClose }) {
+        function EditModalInViewer({ dokument, onSave, onClose, ordner }) {
             const [betrag, setBetrag] = React.useState(dokument.betrag || '');
             const [datum, setDatum] = React.useState(dokument.datum || '');
             const [kategorie, setKategorie] = React.useState(dokument.kategorie || 'Sonstiges');
             const [beschreibung, setBeschreibung] = React.useState(dokument.beschreibung || '');
             const [rechnungsnummer, setRechnungsnummer] = React.useState(dokument.rechnungsnummer || '');
+            const [absender, setAbsender] = React.useState(dokument.absender || '');
             
             return (
                 <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onClose}>
@@ -2865,6 +2867,19 @@
                                 />
                             </div>
                             <div className="col-span-2">
+                                <label className="block text-sm font-semibold mb-1">Absender/Firma (Ordner)</label>
+                                <select
+                                    value={absender}
+                                    onChange={(e) => setAbsender(e.target.value)}
+                                    className="w-full px-3 py-2 border rounded"
+                                >
+                                    <option value={dokument.absender}>{dokument.absender}</option>
+                                    {ordner && ordner.filter(ord => ord !== dokument.absender).map(ord => (
+                                        <option key={ord} value={ord}>{ord}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="col-span-2">
                                 <label className="block text-sm font-semibold mb-1">Beschreibung</label>
                                 <input
                                     type="text"
@@ -2876,7 +2891,7 @@
                         </div>
                         <div className="flex gap-2 mt-4">
                             <button
-                                onClick={() => onSave({ betrag, datum, kategorie, beschreibung, rechnungsnummer })}
+                                onClick={() => onSave({ betrag, datum, kategorie, beschreibung, rechnungsnummer, absender, lieferant: absender })}
                                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                             >
                                 ✅ Speichern
