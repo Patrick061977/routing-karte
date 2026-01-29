@@ -2521,6 +2521,35 @@
                             </div>
                         </div>
                         
+                        {/* NEU: DATEINAME-FELD */}
+                        <div className="mb-4">
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">📄 Dateiname:</label>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={dateiname}
+                                    onChange={(e) => setDateiname(e.target.value)}
+                                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono text-sm"
+                                    placeholder="2024-04-19_Firma_123.45.pdf"
+                                />
+                                <button
+                                    onClick={() => {
+                                        const generated = generateFilename({
+                                            datum: vorschlag.datum,
+                                            absender: neuerOrdner || selectedOrdner || vorschlag.absender,
+                                            betrag: vorschlag.betrag
+                                        });
+                                        setDateiname(generated);
+                                    }}
+                                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold"
+                                    title="Automatisch aus Feldern generieren"
+                                >
+                                    🔄
+                                </button>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">Format: YYYY-MM-DD_Absender_Betrag.pdf</p>
+                        </div>
+                        
                         {/* Kategorie-Vorschläge */}
                         <div className="mb-4">
                             <h3 className="font-semibold text-lg text-gray-800 mb-3">📂 Kategorie:</h3>
@@ -2657,7 +2686,7 @@
                                         console.log('✅ DEBUG: Neuer Ordner automatisch erstellt:', finalOrdner);
                                     }
                                     
-                                    onAccept({ ...vorschlag, kategorie: selectedKategorie, ordner: finalOrdner });
+                                    onAccept({ ...vorschlag, kategorie: selectedKategorie, ordner: finalOrdner, dateiname });
                                 }}
                                 className="flex-1 bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700 font-semibold text-lg"
                             >
@@ -2836,11 +2865,37 @@
             const [beschreibung, setBeschreibung] = React.useState(dokument.beschreibung || '');
             const [rechnungsnummer, setRechnungsnummer] = React.useState(dokument.rechnungsnummer || '');
             const [absender, setAbsender] = React.useState(dokument.absender || '');
+            const [dateiname, setDateiname] = React.useState(dokument.dateiname || '');
             
             return (
                 <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={onClose}>
-                    <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4" onClick={(e) => e.stopPropagation()}>
+                    <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
                         <h3 className="text-xl font-bold mb-4">✏️ Dokument bearbeiten</h3>
+                        
+                        {/* NEU: DATEINAME FELD GANZ OBEN */}
+                        <div className="mb-4 col-span-2">
+                            <label className="block text-sm font-semibold mb-1">📄 Dateiname</label>
+                            <div className="flex gap-2">
+                                <input
+                                    type="text"
+                                    value={dateiname}
+                                    onChange={(e) => setDateiname(e.target.value)}
+                                    className="flex-1 px-3 py-2 border rounded font-mono text-sm"
+                                />
+                                <button
+                                    onClick={() => {
+                                        const generated = generateFilename({ datum, absender, betrag });
+                                        setDateiname(generated);
+                                    }}
+                                    className="px-3 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                                    title="Aus Feldern generieren"
+                                >
+                                    🔄
+                                </button>
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">Format: YYYY-MM-DD_Absender_Betrag.pdf</p>
+                        </div>
+                        
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-semibold mb-1">Betrag (€)</label>
@@ -2913,7 +2968,7 @@
                         </div>
                         <div className="flex gap-2 mt-4">
                             <button
-                                onClick={() => onSave({ betrag, datum, kategorie, beschreibung, rechnungsnummer, absender, lieferant: absender })}
+                                onClick={() => onSave({ betrag, datum, kategorie, beschreibung, rechnungsnummer, absender, lieferant: absender, dateiname })}
                                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
                             >
                                 ✅ Speichern
