@@ -70,6 +70,27 @@
         }
         const db = firebase.firestore();
         const storage = firebase.storage();
+        
+        // NEU: Dateiname-Generator Funktion
+        function generateFilename(dokument) {
+            let datum = dokument.datum || new Date().toISOString().split('T')[0];
+            if (datum.includes('.')) {
+                const parts = datum.split('.');
+                datum = `${parts[2]}-${parts[1]}-${parts[0]}`;
+            }
+            
+            const absender = (dokument.absender || 'Unbekannt')
+                .replace(/\s+/g, '-')
+                .replace(/[^a-zA-Z0-9\-äöüÄÖÜß]/g, '')
+                .substring(0, 30);
+            
+            const betrag = (dokument.betrag || '0')
+                .toString()
+                .replace(',', '.')
+                .replace(/[^0-9.]/g, '');
+            
+            return `${datum}_${absender}_${betrag}.pdf`;
+        }
 
         // DATEV SKR03 Kontenrahmen
         const KONTENRAHMEN = {
@@ -104,7 +125,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "7.1.0 - Bearbeiten-Modal mit Absender & Ordner!";
+        const VERSION = "8.0.0 - PDF-Viewer mit Live-Edit-Sidebar + Auto-Dateinamen (Rechnungsdatum)!";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
@@ -2432,8 +2453,9 @@
         function KategorieVorschlagModal({ vorschlag, onAccept, onReject, customOrdner }) {
             const [selectedKategorie, setSelectedKategorie] = useState(vorschlag.kategorieVorschlaege[0]?.kategorie || 'Sonstiges');
             const [selectedOrdner, setSelectedOrdner] = useState('');
-            const [neuerOrdner, setNeuerOrdner] = useState(''); // NEU: Für neuen Ordner
-            const [erstelleNeuenOrdner, setErstelleNeuenOrdner] = useState(false); // NEU: Toggle
+            const [neuerOrdner, setNeuerOrdner] = useState('');
+            const [erstelleNeuenOrdner, setErstelleNeuenOrdner] = useState(false);
+            const [dateiname, setDateiname] = useState(generateFilename(vorschlag)); // NEU!
             
             const kategorieIcons = {
                 'Versicherung': '🛡️',
