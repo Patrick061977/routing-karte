@@ -72,24 +72,46 @@
         const storage = firebase.storage();
         
         // NEU: Dateiname-Generator Funktion
-        function generateFilename(dokument) {
+        function generateFilename(dokument, template) {
+            // Template aus LocalStorage oder Default
+            const defaultTemplate = localStorage.getItem('filenameTemplate') || '[DATUM]_[FIRMA]_[BETRAG].pdf';
+            const useTemplate = template || defaultTemplate;
+            
+            // Datum formatieren
             let datum = dokument.datum || new Date().toISOString().split('T')[0];
             if (datum.includes('.')) {
                 const parts = datum.split('.');
                 datum = `${parts[2]}-${parts[1]}-${parts[0]}`;
             }
+            const datumObj = new Date(datum);
+            const jahr = datumObj.getFullYear();
+            const monat = String(datumObj.getMonth() + 1).padStart(2, '0');
+            const tag = String(datumObj.getDate()).padStart(2, '0');
             
-            const absender = (dokument.absender || 'Unbekannt')
+            // Absender bereinigen
+            const firma = (dokument.absender || 'Unbekannt')
                 .replace(/\s+/g, '-')
                 .replace(/[^a-zA-Z0-9\-äöüÄÖÜß]/g, '')
                 .substring(0, 30);
             
+            // Betrag formatieren
             const betrag = (dokument.betrag || '0')
                 .toString()
                 .replace(',', '.')
                 .replace(/[^0-9.]/g, '');
             
-            return `${datum}_${absender}_${betrag}.pdf`;
+            // Rechnungsnummer
+            const rechnr = (dokument.rechnungsnummer || 'XX').replace(/[^a-zA-Z0-9]/g, '');
+            
+            // Platzhalter ersetzen
+            return useTemplate
+                .replace('[DATUM]', datum)
+                .replace('[JAHR]', jahr)
+                .replace('[MONAT]', monat)
+                .replace('[TAG]', tag)
+                .replace('[FIRMA]', firma)
+                .replace('[BETRAG]', betrag)
+                .replace('[RECHNR]', rechnr);
         }
 
         // DATEV SKR03 Kontenrahmen
@@ -125,7 +147,7 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "8.0.0 - PDF-Viewer mit Live-Edit-Sidebar + Auto-Dateinamen (Rechnungsdatum)!";
+        const VERSION = "8.1.0 - Dateiname-Templates + OCR-Struktur-Analyse!";
 
         function BuchhaltungApp() {
             const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
@@ -509,9 +531,14 @@
             async function saveDokument(dokData) {
                 console.log('🔧 DEBUG: saveDokument aufgerufen mit:', dokData);
                 console.log('📁 DEBUG: Ordner:', dokData.ordner);
+                console.log('📄 DEBUG: Dateiname:', dokData.dateiname);
+                
+                // NEU: Fallback für Dateiname
+                const finalDateiname = dokData.dateiname || generateFilename(dokData) || `dokument_${Date.now()}.pdf`;
+                console.log('📄 DEBUG: Finaler Dateiname:', finalDateiname);
                 
                 const dokument = {
-                    dateiname: dokData.dateiname,
+                    dateiname: finalDateiname,
                     pdfUrl: dokData.pdfUrl,
                     thumbnail: dokData.thumbnail,
                     volltext: dokData.volltext,
@@ -523,7 +550,7 @@
                     rechnungsnummer: dokData.rechnungsnummer,
                     belegnummer: dokData.rechnungsnummer,
                     kategorie: dokData.kategorie,
-                    ordner: dokData.ordner || '', // NEU: Ordner speichern
+                    ordner: dokData.ordner || '',
                     faelligkeitsdatum: dokData.faelligkeitsdatum,
                     faelligAm: dokData.faelligkeitsdatum,
                     ustSatz: '19',
@@ -539,10 +566,17 @@
                 };
 
                 console.log('💾 DEBUG: Speichere Dokument:', dokument);
-                await db.collection('dokumente').add(dokument);
-                console.log('✅ DEBUG: Dokument gespeichert!');
-                await loadData();
-                console.log('🔄 DEBUG: Daten neu geladen!');
+                
+                try {
+                    await db.collection('dokumente').add(dokument);
+                    console.log('✅ DEBUG: Dokument gespeichert!');
+                    await loadData();
+                    console.log('🔄 DEBUG: Daten neu geladen!');
+                } catch (error) {
+                    console.error('❌ DEBUG: Fehler beim Speichern:', error);
+                    alert('❌ Fehler beim Speichern: ' + error.message);
+                    throw error;
+                }
             }
 
             function analyzeTextIntelligent(text, confidence) {
@@ -2523,8 +2557,8 @@
                         
                         {/* NEU: DATEINAME-FELD */}
                         <div className="mb-4">
-                            <label className="block text-sm font-semibold text-gray-700 mb-2">📄 Dateiname:</label>
-                            <div className="flex gap-2">
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">📄 Dateiname-Template:</label>
+                            <div className="flex gap-2 mb-2">
                                 <input
                                     type="text"
                                     value={dateiname}
@@ -2537,7 +2571,8 @@
                                         const generated = generateFilename({
                                             datum: vorschlag.datum,
                                             absender: neuerOrdner || selectedOrdner || vorschlag.absender,
-                                            betrag: vorschlag.betrag
+                                            betrag: vorschlag.betrag,
+                                            rechnungsnummer: vorschlag.rechnungsnummer
                                         });
                                         setDateiname(generated);
                                     }}
@@ -2547,8 +2582,51 @@
                                     🔄
                                 </button>
                             </div>
-                            <p className="text-xs text-gray-500 mt-1">Format: YYYY-MM-DD_Absender_Betrag.pdf</p>
+                            <details className="text-xs text-gray-600 bg-blue-50 rounded p-2">
+                                <summary className="cursor-pointer font-semibold">💡 Template-Platzhalter</summary>
+                                <div className="mt-2 space-y-1">
+                                    <div><code className="bg-white px-1">[DATUM]</code> = 2024-04-19</div>
+                                    <div><code className="bg-white px-1">[JAHR]</code> = 2024</div>
+                                    <div><code className="bg-white px-1">[MONAT]</code> = 04</div>
+                                    <div><code className="bg-white px-1">[TAG]</code> = 19</div>
+                                    <div><code className="bg-white px-1">[FIRMA]</code> = {vorschlag.absender || 'Firma'}</div>
+                                    <div><code className="bg-white px-1">[BETRAG]</code> = {vorschlag.betrag || '0.00'}</div>
+                                    <div><code className="bg-white px-1">[RECHNR]</code> = {vorschlag.rechnungsnummer || 'XX'}</div>
+                                    <div className="mt-2 pt-2 border-t">
+                                        Beispiele:<br/>
+                                        <code className="bg-white px-1">[JAHR]-[MONAT]_[FIRMA]_[BETRAG].pdf</code><br/>
+                                        <code className="bg-white px-1">RE[RECHNR]_[FIRMA].pdf</code>
+                                    </div>
+                                </div>
+                            </details>
                         </div>
+                        
+                        {/* NEU: OCR-ANALYSE */}
+                        {vorschlag.volltext && (
+                            <details className="mb-4 bg-gray-50 rounded-lg p-3">
+                                <summary className="cursor-pointer font-semibold text-gray-700">🔍 OCR-Analyse (erste 20 Zeilen)</summary>
+                                <div className="mt-3 text-xs font-mono bg-white rounded p-3 max-h-64 overflow-y-auto">
+                                    {vorschlag.volltext.split('\n').slice(0, 20).map((line, idx) => (
+                                        <div key={idx} className="py-1 border-b border-gray-100 hover:bg-yellow-50">
+                                            <span className="text-gray-400 mr-2">Zeile {idx + 1}:</span>
+                                            <span className={
+                                                line.match(/\d{2}\.\d{2}\.\d{4}/) ? 'bg-green-100' :
+                                                line.match(/\d+[.,]\d{2}\s*(€|EUR)/) ? 'bg-blue-100' :
+                                                line.match(/rechnung/i) ? 'bg-yellow-100' :
+                                                idx < 3 ? 'bg-purple-100' : ''
+                                            }>{line || '(leer)'}</span>
+                                        </div>
+                                    ))}
+                                    <div className="mt-3 p-2 bg-gray-100 rounded text-xs">
+                                        <div className="font-semibold mb-1">Legende:</div>
+                                        <div><span className="bg-purple-100 px-1">Lila</span> = Zeile 1-3 (vermutlich Absender)</div>
+                                        <div><span className="bg-green-100 px-1">Grün</span> = Datum-Pattern erkannt</div>
+                                        <div><span className="bg-blue-100 px-1">Blau</span> = Betrag-Pattern erkannt</div>
+                                        <div><span className="bg-yellow-100 px-1">Gelb</span> = "Rechnung" gefunden</div>
+                                    </div>
+                                </div>
+                            </details>
+                        )}
                         
                         {/* Kategorie-Vorschläge */}
                         <div className="mb-4">
