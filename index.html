@@ -165,13 +165,44 @@
             { name: 'Zinnowitz Zentrum', adresse: 'Hauptstraße, 17454 Zinnowitz', icon: '📍' },
         ];
 
-        // Taxi-Preise (Grundpreis + km-Preis)
+        // Offizielle Taxi-Tarife Landkreis Vorpommern-Greifswald / Usedom
+        // Quelle: Landkreis VG Tarifverordnung (Stand 2024/2025)
         const TAXI_PREISE = {
-            grundpreis: 3.90,
-            kmPreis: 2.30,
-            wartezeit: 0.50, // pro Minute
-            nachtzuschlag: 5.00, // 22-6 Uhr
-            grossraumzuschlag: 5.00
+            grundpreis: 4.00,           // Einsteiggebühr Usedom
+            kmPreis: 2.20,              // Kilometerpreis
+            wartezeit: 33.00 / 60,      // 33,00 €/Stunde = 0,55 €/Minute
+            nachtzuschlag: 0,           // In VG über Nachttarif am Taxameter geregelt
+            grossraumzuschlag: 5.00,    // Zuschlag Großraumfahrzeug
+            // Hinweis: Nachttarif (Mo-Sa 22:00-06:00 + So ganztags) läuft über Taxameter
+            // Diese Preise sind Pflichtfahrgebiet-bindend (nicht über-/unterschreitbar)
+        };
+
+        // Bekannte Entfernungen auf Usedom (in km, ungefähr)
+        const ENTFERNUNGEN = {
+            'Bahnhof Heringsdorf|Flughafen Heringsdorf': 5,
+            'Bahnhof Heringsdorf|Seebrücke Heringsdorf': 2,
+            'Bahnhof Heringsdorf|Seebrücke Ahlbeck': 5,
+            'Bahnhof Heringsdorf|Seebrücke Bansin': 4,
+            'Bahnhof Heringsdorf|Hotel Maritim': 2,
+            'Bahnhof Heringsdorf|Klinik Heringsdorf': 1.5,
+            'Bahnhof Heringsdorf|REWE Heringsdorf': 1,
+            'Bahnhof Heringsdorf|Karls Erlebnis-Dorf': 22,
+            'Bahnhof Heringsdorf|Peenemünde Museum': 40,
+            'Bahnhof Heringsdorf|Wolgast Bahnhof': 45,
+            'Bahnhof Heringsdorf|Zinnowitz Zentrum': 25,
+            'Flughafen Heringsdorf|Seebrücke Heringsdorf': 4,
+            'Flughafen Heringsdorf|Seebrücke Ahlbeck': 7,
+            'Flughafen Heringsdorf|Seebrücke Bansin': 3,
+            'Flughafen Heringsdorf|Hotel Maritim': 4,
+            'Flughafen Heringsdorf|Zinnowitz Zentrum': 20,
+            'Seebrücke Heringsdorf|Seebrücke Ahlbeck': 4,
+            'Seebrücke Heringsdorf|Seebrücke Bansin': 3,
+            'Seebrücke Heringsdorf|Hotel Maritim': 0.5,
+            'Seebrücke Ahlbeck|Seebrücke Bansin': 6,
+            'Seebrücke Ahlbeck|Wolgast Bahnhof': 48,
+            'Zinnowitz Zentrum|Peenemünde Museum': 18,
+            'Zinnowitz Zentrum|Karls Erlebnis-Dorf': 5,
+            'Zinnowitz Zentrum|Wolgast Bahnhof': 20,
         };
 
         function BuchhaltungApp() {
@@ -198,6 +229,22 @@
             const [customOrdner, setCustomOrdner] = useState([]); // NEU: Benutzerdefinierte Ordner
             const [showCleanupModal, setShowCleanupModal] = useState(false); // NEU: Cleanup Modal
             const [taxiBuchungen, setTaxiBuchungen] = useState([]); // Taxi-Buchungen
+
+            // Taxi-Buchungen aus Firebase laden (für Ablaufplan)
+            useEffect(() => {
+                async function loadTaxiBuchungen() {
+                    try {
+                        const snapshot = await db.collection('taxi_buchungen')
+                            .orderBy('erstelltAm', 'desc')
+                            .limit(50)
+                            .get();
+                        setTaxiBuchungen(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+                    } catch (e) {
+                        console.warn('Taxi-Buchungen laden:', e.message);
+                    }
+                }
+                loadTaxiBuchungen();
+            }, []);
 
             useEffect(() => {
                 loadData();
@@ -1195,7 +1242,7 @@
                         )}
 
                         {activeTab === 'workflow' && (
-                            <WorkflowDiagramm />
+                            <WorkflowDiagramm buchungsListe={taxiBuchungen} />
                         )}
 
                         {activeTab === 'dashboard' && (
@@ -3165,290 +3212,398 @@
         // ============================================
         // WORKFLOW-DIAGRAMM - Visueller Ablaufplan
         // ============================================
-        function WorkflowDiagramm() {
-            const schritte = [
+        function WorkflowDiagramm({ buchungsListe }) {
+            const [selectedProtokoll, setSelectedProtokoll] = useState(null);
+
+            // Echte Prüfschritte die bei JEDER Bestellung durchlaufen werden
+            const pruefSchritte = [
                 {
-                    id: 1,
-                    titel: 'Kunde öffnet App',
-                    beschreibung: 'Taxi-Buchung Tab wird automatisch angezeigt',
-                    icon: '📱',
-                    farbe: 'bg-blue-500',
-                    klicks: 0,
-                    probleme: [],
-                },
-                {
-                    id: 2,
-                    titel: 'Abholort wählen',
-                    beschreibung: 'Schnellauswahl aus bekannten Orten ODER freie Adresseingabe',
-                    icon: '📍',
-                    farbe: 'bg-green-500',
-                    klicks: 1,
-                    probleme: [
-                        { text: 'Adresse nicht in Schnellauswahl', loesung: 'Freie Texteingabe als Fallback' },
-                        { text: 'Tippfehler in Adresse', loesung: 'Dispatcher prüft vor Annahme' },
-                    ],
-                },
-                {
-                    id: 3,
-                    titel: 'Zielort wählen',
-                    beschreibung: 'Gleiche Auswahl wie Abholung - ein Klick auf bekannten Ort reicht',
-                    icon: '🏁',
-                    farbe: 'bg-yellow-500',
-                    klicks: 1,
-                    probleme: [
-                        { text: 'Ziel außerhalb Usedom', loesung: 'Preis wird höher, Warnung anzeigen' },
-                    ],
-                },
-                {
-                    id: 4,
-                    titel: 'Details festlegen',
-                    beschreibung: 'Sofort/Vorbestellen, Standard/Großraum, Personen, Name & Telefon (optional)',
-                    icon: '⚙️',
-                    farbe: 'bg-purple-500',
-                    klicks: '1-3',
-                    probleme: [
-                        { text: 'Großraum nicht verfügbar', loesung: 'Status-Prüfung vor Buchung, Alternative anbieten' },
-                        { text: 'Zeitpunkt in der Vergangenheit', loesung: 'Validierung: nur Zukunft erlauben' },
-                    ],
-                },
-                {
-                    id: 5,
-                    titel: '"Taxi bestellen!" Button',
-                    beschreibung: 'Ein Klick → Buchung wird in Firebase gespeichert',
-                    icon: '✅',
-                    farbe: 'bg-green-600',
-                    klicks: 1,
-                    probleme: [
-                        { text: 'Firebase nicht erreichbar', loesung: 'Offline-Queue + Retry-Logik' },
-                        { text: 'Doppelklick / Doppelbuchung', loesung: 'Button nach Klick deaktivieren' },
-                    ],
-                },
-                {
-                    id: 6,
-                    titel: 'Bestätigung angezeigt',
-                    beschreibung: 'Zusammenfassung mit Route, Zeit und geschätztem Preis',
+                    nr: 1,
+                    name: 'Pflichtfelder prüfen',
+                    was: 'Ist Abholadresse vorhanden und mindestens 2 Zeichen lang? Ist Zieladresse vorhanden und mindestens 2 Zeichen lang?',
+                    kriterien: ['Abholung !== leer', 'Abholung.length >= 2', 'Ziel !== leer', 'Ziel.length >= 2'],
+                    beiErfolg: 'Weiter zu Schritt 2',
+                    beiFehler: 'ABBRUCH - Buchung wird NICHT erstellt, Fehlermeldung anzeigen',
                     icon: '📋',
-                    farbe: 'bg-blue-600',
-                    klicks: 0,
-                    probleme: [],
-                },
-            ];
-
-            const backendSchritte = [
-                {
-                    id: 'B1',
-                    titel: 'Neue Buchung in Firebase',
-                    beschreibung: 'Status: "neu" - wird in Echtzeit in der Buchungsliste angezeigt',
-                    icon: '🔥',
-                    farbe: 'bg-orange-500',
+                    farbe: 'border-blue-500 bg-blue-50',
                 },
                 {
-                    id: 'B2',
-                    titel: 'Dispatcher sieht Buchung',
-                    beschreibung: 'Buchungsliste zeigt alle neuen Aufträge mit Annehmen/Storno-Buttons',
-                    icon: '👨‍💼',
-                    farbe: 'bg-indigo-500',
+                    nr: 2,
+                    name: 'Identische Adressen',
+                    was: 'Sind Abholung und Ziel verschiedene Adressen?',
+                    kriterien: ['Abholung !== Ziel'],
+                    beiErfolg: 'Weiter zu Schritt 3',
+                    beiFehler: 'ABBRUCH - "Abholung und Ziel sind identisch!"',
+                    icon: '🔄',
+                    farbe: 'border-red-500 bg-red-50',
                 },
                 {
-                    id: 'B3',
-                    titel: 'Fahrer zuweisen',
-                    beschreibung: 'Status → "angenommen" - Fahrer wird informiert',
-                    icon: '🚕',
-                    farbe: 'bg-blue-500',
+                    nr: 3,
+                    name: 'Zeitpunkt validieren',
+                    was: 'Wenn Vorbestellung: Liegt der gewünschte Zeitpunkt in der Zukunft? Ist eine Uhrzeit angegeben?',
+                    kriterien: [
+                        'Wenn "Sofort" → automatisch OK',
+                        'Wenn "Vorbestellen" → Datum+Uhrzeit > jetzt',
+                        'Warnung wenn keine Uhrzeit (wird als 00:00 interpretiert)',
+                    ],
+                    beiErfolg: 'Weiter zu Schritt 4',
+                    beiFehler: 'ABBRUCH bei Vergangenheit / WARNUNG bei fehlender Uhrzeit',
+                    icon: '🕐',
+                    farbe: 'border-yellow-500 bg-yellow-50',
                 },
                 {
-                    id: 'B4',
-                    titel: 'Fahrt läuft',
-                    beschreibung: 'Status → "unterwegs" - Kunde kann Status sehen',
-                    icon: '🛣️',
-                    farbe: 'bg-purple-500',
+                    nr: 4,
+                    name: 'Fahrzeugtyp vs. Personen',
+                    was: 'Passt die Personenanzahl zum gewählten Fahrzeugtyp? Standard-Taxi max. 4 Personen.',
+                    kriterien: [
+                        'Standard + ≤ 4 Personen → OK',
+                        'Standard + > 4 Personen → AUTO-KORREKTUR auf Großraum + Warnung',
+                        'Großraum + ≤ 8 Personen → OK',
+                    ],
+                    beiErfolg: 'Weiter zu Schritt 5',
+                    beiFehler: 'Automatische Korrektur (kein Abbruch)',
+                    icon: '🚗',
+                    farbe: 'border-purple-500 bg-purple-50',
                 },
                 {
-                    id: 'B5',
-                    titel: 'Fahrt abgeschlossen',
-                    beschreibung: 'Status → "abgeschlossen" - wird automatisch in Buchhaltung übernommen',
+                    nr: 5,
+                    name: 'Duplikat-Erkennung',
+                    was: 'Gibt es in den letzten 30 Minuten bereits eine Buchung mit gleicher Route?',
+                    kriterien: [
+                        'Suche in bestehenden Buchungen',
+                        'Gleiche Abholung UND gleiches Ziel',
+                        'Erstellt innerhalb der letzten 30 Minuten',
+                        'Status nicht "storniert"',
+                    ],
+                    beiErfolg: 'Weiter zu Schritt 6',
+                    beiFehler: 'WARNUNG mit Details der möglichen Duplikat-Buchung (kein Abbruch)',
+                    icon: '🔍',
+                    farbe: 'border-orange-500 bg-orange-50',
+                },
+                {
+                    nr: 6,
+                    name: 'Nachtfahrt-Check',
+                    was: 'Fällt die Fahrt in den Nachtzeitraum? Mo-Sa 22:00-06:00 Uhr oder Sonn-/Feiertag ganztags.',
+                    kriterien: [
+                        'Bei "Sofort": aktuelle Uhrzeit prüfen',
+                        'Bei Vorbestellung: gewählte Uhrzeit prüfen',
+                        'Stunde >= 22 ODER Stunde < 6 → Nachtfahrt',
+                    ],
+                    beiErfolg: 'Weiter zu Schritt 7 (ohne Zuschlag-Hinweis)',
+                    beiFehler: 'WARNUNG: Nachttarif aktiv (Info, kein Abbruch)',
+                    icon: '🌙',
+                    farbe: 'border-indigo-500 bg-indigo-50',
+                },
+                {
+                    nr: 7,
+                    name: 'Preisberechnung',
+                    was: 'Geschätzten Fahrpreis nach offiziellem Tarif Landkreis Vorpommern-Greifswald berechnen.',
+                    kriterien: [
+                        `Grundpreis: ${TAXI_PREISE.grundpreis.toFixed(2)} € (Einsteiggebühr)`,
+                        `Kilometerpreis: ${TAXI_PREISE.kmPreis.toFixed(2)} €/km`,
+                        'Strecke: aus Entfernungstabelle ODER Schätzung 10 km',
+                        `Großraumzuschlag: ${TAXI_PREISE.grossraumzuschlag.toFixed(2)} € (wenn Großraum)`,
+                        'Nachttarif: über Taxameter geregelt',
+                    ],
+                    beiErfolg: 'Preis berechnet - weiter zu Schritt 8',
+                    beiFehler: 'Kann nicht fehlschlagen (immer OK)',
                     icon: '💰',
-                    farbe: 'bg-green-600',
+                    farbe: 'border-green-500 bg-green-50',
+                },
+                {
+                    nr: 8,
+                    name: 'Kontaktdaten prüfen',
+                    was: 'Ist eine Telefonnummer angegeben? Wenn ja, hat sie ein gültiges Format?',
+                    kriterien: [
+                        'Keine Telefonnummer → WARNUNG (kein Rückruf möglich)',
+                        'Telefonnummer < 6 Ziffern → WARNUNG (zu kurz)',
+                        'Telefonnummer beginnt nicht mit + oder 0 → WARNUNG (ungewöhnlich)',
+                        'Sonst → OK',
+                    ],
+                    beiErfolg: 'Weiter zu Schritt 9',
+                    beiFehler: 'Nur Warnungen (kein Abbruch)',
+                    icon: '📞',
+                    farbe: 'border-teal-500 bg-teal-50',
+                },
+                {
+                    nr: 9,
+                    name: 'Firebase-Verbindung & Speichern',
+                    was: 'Buchung in Firebase Firestore speichern (Collection: taxi_buchungen).',
+                    kriterien: [
+                        'Firebase-Verbindung aktiv?',
+                        'Schreibberechtigung vorhanden?',
+                        'Dokument erfolgreich geschrieben?',
+                        'Buchungs-ID zurückerhalten?',
+                        'Prüfprotokoll wird MIT-gespeichert',
+                    ],
+                    beiErfolg: 'Buchung erstellt - Buchungs-ID anzeigen',
+                    beiFehler: 'ABBRUCH - "Buchung konnte nicht gespeichert werden" + Fehlermeldung',
+                    icon: '🔥',
+                    farbe: 'border-orange-500 bg-orange-50',
+                },
+                {
+                    nr: 10,
+                    name: 'Abschluss & Zusammenfassung',
+                    was: 'Alle Prüfergebnisse zusammenzählen und Gesamtergebnis anzeigen.',
+                    kriterien: [
+                        'Anzahl OK-Prüfungen zählen',
+                        'Anzahl Warnungen zählen',
+                        'Anzahl Fehler zählen (sollte 0 sein)',
+                        'Buchungsdetails anzeigen',
+                    ],
+                    beiErfolg: 'BUCHUNG ERFOLGREICH - Bestätigungsseite anzeigen',
+                    beiFehler: 'Nie (Schritt 10 nur bei Erfolg erreicht)',
+                    icon: '✅',
+                    farbe: 'border-green-600 bg-green-100',
                 },
             ];
 
-            const moeglicheProbleme = [
-                { kategorie: 'Netzwerk', problem: 'Keine Internetverbindung', loesung: 'Offline-Modus mit lokaler Speicherung, Sync bei Reconnect', schwere: 'hoch' },
-                { kategorie: 'Verfügbarkeit', problem: 'Kein Taxi verfügbar', loesung: 'Wartezeit-Schätzung anzeigen, Vorbestellung anbieten', schwere: 'mittel' },
-                { kategorie: 'Zahlung', problem: 'Kunde will mit Karte zahlen', loesung: 'Zahlungsart im Buchungsformular ergänzen', schwere: 'niedrig' },
-                { kategorie: 'Stornierung', problem: 'Kunde storniert nach Zuweisung', loesung: 'Storno-Gebühr definieren, Fahrer informieren', schwere: 'mittel' },
-                { kategorie: 'Adresse', problem: 'GPS-Koordinaten ungenau', loesung: 'Bekannte Orte als Referenzpunkte, Freitext als Backup', schwere: 'niedrig' },
-                { kategorie: 'Doppelbuchung', problem: 'Gleicher Kunde bucht zweimal', loesung: 'Duplikat-Erkennung basierend auf Telefon + Zeitraum', schwere: 'mittel' },
-            ];
+            // Letzte Buchungen mit Prüfprotokoll finden
+            const buchungenMitProtokoll = (buchungsListe || []).filter(b => b.pruefProtokoll && b.pruefProtokoll.length > 0);
 
             return (
                 <div className="space-y-8">
-                    <h2 className="text-3xl font-bold text-gray-800">Taxi-Buchungs-Workflow - Ablaufplan</h2>
+                    <h2 className="text-3xl font-bold text-gray-800">Bestellungs-Ablauf: Was wird geprüft?</h2>
+                    <p className="text-gray-600">
+                        Dieser Ablaufplan zeigt dir <strong>exakt</strong> welche Schritte bei jeder eingehenden Bestellung
+                        durchlaufen werden, welche Kriterien geprüft werden, und was bei Erfolg/Fehler passiert.
+                    </p>
 
-                    {/* KUNDEN-WORKFLOW */}
+                    {/* PRÜF-ABLAUF DIAGRAMM */}
                     <div className="bg-white rounded-xl shadow-lg p-6">
-                        <h3 className="text-xl font-bold text-blue-700 mb-6 flex items-center gap-2">
-                            <span className="bg-blue-100 p-2 rounded-lg">👤</span>
-                            Kunden-Workflow (Frontend)
-                        </h3>
-                        <p className="text-gray-600 mb-6 text-sm">
-                            Ziel: <strong>Minimale Klicks</strong> - Der Kunde braucht nur <strong>3 Klicks</strong> für eine Standardbuchung
-                            (Abholort klicken → Zielort klicken → "Taxi bestellen!")
-                        </p>
+                        <h3 className="text-xl font-bold text-gray-800 mb-2">Automatischer Prüfablauf bei Bestelleingang</h3>
+                        <p className="text-sm text-gray-500 mb-6">10 Prüfschritte werden sequentiell durchlaufen. Bei einem Fehler in Schritt 1-2 oder 9 wird abgebrochen.</p>
 
                         <div className="relative">
-                            {schritte.map((schritt, index) => (
-                                <div key={schritt.id} className="flex gap-4 mb-6 last:mb-0">
-                                    {/* Verbindungslinie */}
-                                    <div className="flex flex-col items-center">
-                                        <div className={`w-12 h-12 ${schritt.farbe} rounded-full flex items-center justify-center text-white text-xl shadow-lg`}>
+                            {pruefSchritte.map((schritt, index) => (
+                                <div key={schritt.nr} className="flex gap-4 mb-1 last:mb-0">
+                                    {/* Verbindungslinie links */}
+                                    <div className="flex flex-col items-center w-14 flex-shrink-0">
+                                        <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl shadow-md border-2 ${
+                                            schritt.beiFehler.startsWith('ABBRUCH') ? 'bg-red-100 border-red-400' :
+                                            schritt.beiFehler.includes('WARNUNG') || schritt.beiFehler.includes('Warnung') ? 'bg-yellow-100 border-yellow-400' :
+                                            'bg-green-100 border-green-400'
+                                        }`}>
                                             {schritt.icon}
                                         </div>
-                                        {index < schritte.length - 1 && (
-                                            <div className="w-0.5 h-full min-h-[20px] bg-gray-300 my-1"></div>
+                                        {index < pruefSchritte.length - 1 && (
+                                            <div className="w-0.5 h-full min-h-[16px] bg-gray-300 my-1 relative">
+                                                <span className="absolute -left-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">▼</span>
+                                            </div>
                                         )}
                                     </div>
 
                                     {/* Inhalt */}
-                                    <div className="flex-1 pb-4">
-                                        <div className="flex items-center gap-3 mb-1">
-                                            <h4 className="font-bold text-lg">{schritt.titel}</h4>
-                                            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-semibold">
-                                                {schritt.klicks === 0 ? 'Automatisch' : `${schritt.klicks} Klick${schritt.klicks !== 1 ? 's' : ''}`}
-                                            </span>
+                                    <div className={`flex-1 border-l-4 rounded-r-lg p-4 mb-2 ${schritt.farbe}`}>
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="bg-gray-800 text-white text-xs font-bold px-2 py-0.5 rounded">#{schritt.nr}</span>
+                                            <h4 className="font-bold text-base">{schritt.name}</h4>
+                                            {schritt.beiFehler.startsWith('ABBRUCH') && (
+                                                <span className="bg-red-200 text-red-800 text-xs font-bold px-2 py-0.5 rounded">KANN ABBRECHEN</span>
+                                            )}
+                                            {(schritt.beiFehler.includes('WARNUNG') || schritt.beiFehler.includes('Warnung')) && !schritt.beiFehler.startsWith('ABBRUCH') && (
+                                                <span className="bg-yellow-200 text-yellow-800 text-xs font-bold px-2 py-0.5 rounded">KANN WARNEN</span>
+                                            )}
+                                            {schritt.beiFehler.includes('nicht fehlschlagen') && (
+                                                <span className="bg-green-200 text-green-800 text-xs font-bold px-2 py-0.5 rounded">IMMER OK</span>
+                                            )}
                                         </div>
-                                        <p className="text-gray-600 text-sm mb-2">{schritt.beschreibung}</p>
 
-                                        {/* Probleme */}
-                                        {schritt.probleme.length > 0 && (
-                                            <div className="space-y-1">
-                                                {schritt.probleme.map((p, i) => (
-                                                    <div key={i} className="flex items-start gap-2 text-xs">
-                                                        <span className="text-red-500 font-bold mt-0.5">⚠️</span>
-                                                        <div>
-                                                            <span className="text-red-700 font-medium">{p.text}</span>
-                                                            <span className="text-gray-400 mx-1">→</span>
-                                                            <span className="text-green-700">{p.loesung}</span>
-                                                        </div>
+                                        <p className="text-sm text-gray-700 mb-2">{schritt.was}</p>
+
+                                        {/* Kriterien */}
+                                        <div className="mb-2">
+                                            <div className="text-xs font-semibold text-gray-500 mb-1">Prüf-Kriterien:</div>
+                                            <div className="space-y-0.5">
+                                                {schritt.kriterien.map((k, ki) => (
+                                                    <div key={ki} className="flex items-center gap-1 text-xs">
+                                                        <span className="text-gray-400">•</span>
+                                                        <code className="bg-white bg-opacity-70 px-1 py-0.5 rounded text-gray-700 font-mono text-xs">{k}</code>
                                                     </div>
                                                 ))}
                                             </div>
-                                        )}
+                                        </div>
+
+                                        {/* Ergebnis */}
+                                        <div className="flex gap-4 text-xs">
+                                            <div className="flex items-start gap-1">
+                                                <span className="text-green-600 font-bold">✅</span>
+                                                <span className="text-green-700">{schritt.beiErfolg}</span>
+                                            </div>
+                                            <div className="flex items-start gap-1">
+                                                <span className="text-red-600 font-bold">❌</span>
+                                                <span className="text-red-700">{schritt.beiFehler}</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                             ))}
                         </div>
                     </div>
 
-                    {/* BACKEND-WORKFLOW */}
-                    <div className="bg-white rounded-xl shadow-lg p-6">
-                        <h3 className="text-xl font-bold text-indigo-700 mb-6 flex items-center gap-2">
-                            <span className="bg-indigo-100 p-2 rounded-lg">🖥️</span>
-                            Dispatcher/Backend-Workflow
-                        </h3>
+                    {/* ECHTE PRÜFPROTOKOLLE AUS FIREBASE */}
+                    {buchungenMitProtokoll.length > 0 && (
+                        <div className="bg-white rounded-xl shadow-lg p-6">
+                            <h3 className="text-xl font-bold text-gray-800 mb-4">Echte Prüfprotokolle aus Bestellungen</h3>
+                            <p className="text-sm text-gray-500 mb-4">
+                                Hier siehst du die tatsächlichen Prüfergebnisse der letzten Bestellungen - was wurde geprüft, was hat funktioniert, was nicht.
+                            </p>
 
-                        <div className="flex flex-wrap gap-3">
-                            {backendSchritte.map((schritt, index) => (
-                                <React.Fragment key={schritt.id}>
-                                    <div className="bg-gray-50 rounded-lg p-4 flex-1 min-w-[180px] border-2 border-gray-200 hover:border-blue-300 transition-colors">
-                                        <div className={`w-10 h-10 ${schritt.farbe} rounded-full flex items-center justify-center text-white text-lg mb-2`}>
-                                            {schritt.icon}
-                                        </div>
-                                        <h4 className="font-bold text-sm mb-1">{schritt.titel}</h4>
-                                        <p className="text-xs text-gray-600">{schritt.beschreibung}</p>
+                            <div className="space-y-3">
+                                {buchungenMitProtokoll.slice(0, 10).map(b => (
+                                    <div key={b.id} className="border rounded-lg overflow-hidden">
+                                        {/* Buchungs-Header */}
+                                        <button
+                                            onClick={() => setSelectedProtokoll(selectedProtokoll === b.id ? null : b.id)}
+                                            className="w-full flex items-center justify-between p-4 hover:bg-gray-50 text-left"
+                                        >
+                                            <div className="flex items-center gap-4">
+                                                <span className="text-sm font-medium">{new Date(b.erstelltAm).toLocaleString('de-DE')}</span>
+                                                <span className="text-sm text-gray-600">{b.kundenName}</span>
+                                                <span className="text-xs text-gray-400">{b.abholung} → {b.ziel}</span>
+                                            </div>
+                                            <div className="flex items-center gap-3">
+                                                <div className="flex gap-1 text-xs">
+                                                    <span className="bg-green-100 text-green-700 px-1.5 py-0.5 rounded">
+                                                        {b.pruefProtokoll.filter(p => p.status === 'ok').length} OK
+                                                    </span>
+                                                    <span className="bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded">
+                                                        {b.pruefProtokoll.filter(p => p.status === 'warnung').length} Warn
+                                                    </span>
+                                                    <span className="bg-red-100 text-red-700 px-1.5 py-0.5 rounded">
+                                                        {b.pruefProtokoll.filter(p => p.status === 'fehler').length} Err
+                                                    </span>
+                                                </div>
+                                                <span className="text-gray-400">{selectedProtokoll === b.id ? '▲' : '▼'}</span>
+                                            </div>
+                                        </button>
+
+                                        {/* Expandiertes Protokoll */}
+                                        {selectedProtokoll === b.id && (
+                                            <div className="border-t bg-gray-50 p-4">
+                                                <div className="space-y-1">
+                                                    {b.pruefProtokoll.map((p, pi) => (
+                                                        <div key={pi} className={`flex items-center gap-2 text-sm px-3 py-2 rounded ${
+                                                            p.status === 'ok' ? 'bg-green-50 border border-green-200' :
+                                                            p.status === 'warnung' ? 'bg-yellow-50 border border-yellow-200' :
+                                                            p.status === 'fehler' ? 'bg-red-50 border border-red-200' :
+                                                            'bg-blue-50 border border-blue-200'
+                                                        }`}>
+                                                            <span className="flex-shrink-0">
+                                                                {p.status === 'ok' && '✅'}
+                                                                {p.status === 'warnung' && '⚠️'}
+                                                                {p.status === 'fehler' && '❌'}
+                                                                {p.status === 'prueft' && '🔄'}
+                                                            </span>
+                                                            <span className="font-semibold text-sm flex-shrink-0">{p.name}</span>
+                                                            <span className="text-gray-400 flex-shrink-0">|</span>
+                                                            <span className="text-sm text-gray-700 flex-1">{p.detail}</span>
+                                                            <span className="text-xs text-gray-400 flex-shrink-0">{p.zeit}</span>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
-                                    {index < backendSchritte.length - 1 && (
-                                        <div className="flex items-center text-2xl text-gray-400 self-center">→</div>
-                                    )}
-                                </React.Fragment>
-                            ))}
+                                ))}
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     {/* STATUS-FLOW */}
                     <div className="bg-white rounded-xl shadow-lg p-6">
-                        <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-                            <span className="bg-gray-100 p-2 rounded-lg">🔄</span>
-                            Status-Flow der Buchung
-                        </h3>
+                        <h3 className="text-xl font-bold text-gray-800 mb-4">Status-Flow nach erfolgreicher Buchung</h3>
 
                         <div className="flex items-center justify-center gap-2 flex-wrap py-4">
                             {[
-                                { status: 'Neu', farbe: 'bg-yellow-400', text: 'text-yellow-900' },
-                                { status: 'Angenommen', farbe: 'bg-blue-400', text: 'text-blue-900' },
-                                { status: 'Unterwegs', farbe: 'bg-purple-400', text: 'text-purple-900' },
-                                { status: 'Abgeschlossen', farbe: 'bg-green-500', text: 'text-green-900' },
+                                { status: 'Neu', farbe: 'bg-yellow-400', text: 'text-yellow-900', desc: 'Buchung eingegangen' },
+                                { status: 'Angenommen', farbe: 'bg-blue-400', text: 'text-blue-900', desc: 'Dispatcher hat Fahrer zugewiesen' },
+                                { status: 'Unterwegs', farbe: 'bg-purple-400', text: 'text-purple-900', desc: 'Fahrer ist zum Kunden unterwegs' },
+                                { status: 'Abgeschlossen', farbe: 'bg-green-500', text: 'text-green-900', desc: 'Fahrt beendet, Bezahlung erfolgt' },
                             ].map((s, i, arr) => (
                                 <React.Fragment key={s.status}>
-                                    <div className={`${s.farbe} ${s.text} px-6 py-3 rounded-xl font-bold text-sm shadow-md`}>
-                                        {s.status}
+                                    <div className="text-center">
+                                        <div className={`${s.farbe} ${s.text} px-6 py-3 rounded-xl font-bold text-sm shadow-md`}>
+                                            {s.status}
+                                        </div>
+                                        <div className="text-xs text-gray-500 mt-1 max-w-[120px]">{s.desc}</div>
                                     </div>
                                     {i < arr.length - 1 && (
-                                        <span className="text-3xl text-gray-400">→</span>
+                                        <span className="text-3xl text-gray-400 mb-4">→</span>
                                     )}
                                 </React.Fragment>
                             ))}
-                            <div className="ml-8 flex items-center gap-2">
-                                <span className="text-red-500 text-2xl">↗</span>
+                            <div className="ml-8 flex flex-col items-center gap-1">
+                                <span className="text-red-500 text-xl">↗</span>
                                 <div className="bg-red-400 text-red-900 px-6 py-3 rounded-xl font-bold text-sm shadow-md">
                                     Storniert
                                 </div>
-                                <span className="text-xs text-gray-500">(jederzeit vor "Unterwegs")</span>
+                                <span className="text-xs text-gray-500">(vor "Unterwegs")</span>
                             </div>
                         </div>
                     </div>
 
-                    {/* MÖGLICHE PROBLEME */}
+                    {/* TARIF-INFO */}
                     <div className="bg-white rounded-xl shadow-lg p-6">
-                        <h3 className="text-xl font-bold text-red-700 mb-4 flex items-center gap-2">
-                            <span className="bg-red-100 p-2 rounded-lg">⚠️</span>
-                            Mögliche Probleme & Lösungen
-                        </h3>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {moeglicheProbleme.map((p, i) => (
-                                <div key={i} className={`border-l-4 ${
-                                    p.schwere === 'hoch' ? 'border-red-500 bg-red-50' :
-                                    p.schwere === 'mittel' ? 'border-yellow-500 bg-yellow-50' :
-                                    'border-green-500 bg-green-50'
-                                } rounded-r-lg p-4`}>
-                                    <div className="flex items-center gap-2 mb-1">
-                                        <span className={`text-xs font-bold px-2 py-0.5 rounded ${
-                                            p.schwere === 'hoch' ? 'bg-red-200 text-red-800' :
-                                            p.schwere === 'mittel' ? 'bg-yellow-200 text-yellow-800' :
-                                            'bg-green-200 text-green-800'
-                                        }`}>{p.schwere.toUpperCase()}</span>
-                                        <span className="text-xs text-gray-500">{p.kategorie}</span>
-                                    </div>
-                                    <h4 className="font-bold text-sm">{p.problem}</h4>
-                                    <p className="text-xs text-gray-700 mt-1">
-                                        <span className="font-semibold text-green-700">Lösung:</span> {p.loesung}
-                                    </p>
-                                </div>
-                            ))}
+                        <h3 className="text-xl font-bold text-gray-800 mb-4">Offizieller Taxitarif (Landkreis Vorpommern-Greifswald)</h3>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="bg-blue-50 rounded-lg p-4 text-center">
+                                <div className="text-2xl font-bold text-blue-800">{TAXI_PREISE.grundpreis.toFixed(2)} €</div>
+                                <div className="text-xs text-gray-600 mt-1">Grundpreis (Einsteiggebühr)</div>
+                            </div>
+                            <div className="bg-blue-50 rounded-lg p-4 text-center">
+                                <div className="text-2xl font-bold text-blue-800">{TAXI_PREISE.kmPreis.toFixed(2)} €/km</div>
+                                <div className="text-xs text-gray-600 mt-1">Kilometerpreis</div>
+                            </div>
+                            <div className="bg-blue-50 rounded-lg p-4 text-center">
+                                <div className="text-2xl font-bold text-blue-800">{(TAXI_PREISE.wartezeit * 60).toFixed(2)} €/h</div>
+                                <div className="text-xs text-gray-600 mt-1">Wartezeit</div>
+                            </div>
+                            <div className="bg-blue-50 rounded-lg p-4 text-center">
+                                <div className="text-2xl font-bold text-blue-800">{TAXI_PREISE.grossraumzuschlag.toFixed(2)} €</div>
+                                <div className="text-xs text-gray-600 mt-1">Großraumzuschlag</div>
+                            </div>
                         </div>
+                        <p className="text-xs text-gray-400 mt-3 italic">
+                            Pflichtfahrgebiet-bindend. Darf weder über- noch unterschritten werden. Nachttarif (Mo-Sa 22-06 Uhr + So/Feiertag ganztags) über geeichtes Taxameter.
+                        </p>
                     </div>
 
-                    {/* KLICK-ZUSAMMENFASSUNG */}
-                    <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-xl shadow-lg p-6 text-white">
-                        <h3 className="text-xl font-bold mb-4">Effizienz-Zusammenfassung</h3>
-                        <div className="grid grid-cols-3 gap-6 text-center">
-                            <div>
-                                <div className="text-4xl font-bold">3</div>
-                                <div className="text-blue-200 text-sm">Minimum Klicks</div>
-                                <div className="text-xs text-blue-300 mt-1">Schnellauswahl → Schnellauswahl → Bestellen</div>
-                            </div>
-                            <div>
-                                <div className="text-4xl font-bold">~30s</div>
-                                <div className="text-blue-200 text-sm">Buchungszeit</div>
-                                <div className="text-xs text-blue-300 mt-1">Bei bekannten Orten</div>
-                            </div>
-                            <div>
-                                <div className="text-4xl font-bold">5</div>
-                                <div className="text-blue-200 text-sm">Status-Stufen</div>
-                                <div className="text-xs text-blue-300 mt-1">Neu → Angenommen → Unterwegs → Fertig / Storniert</div>
-                            </div>
+                    {/* ENTFERNUNGSTABELLE */}
+                    <div className="bg-white rounded-xl shadow-lg p-6">
+                        <h3 className="text-xl font-bold text-gray-800 mb-4">Hinterlegte Entfernungen & Preise (Usedom)</h3>
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50">
+                                    <tr>
+                                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Von</th>
+                                        <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Nach</th>
+                                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">Entfernung</th>
+                                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">Gesch. Preis</th>
+                                        <th className="px-3 py-2 text-right text-xs font-semibold text-gray-500">mit Großraum</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {Object.entries(ENTFERNUNGEN).sort((a, b) => a[1] - b[1]).map(([route, km]) => {
+                                        const [von, nach] = route.split('|');
+                                        const preis = TAXI_PREISE.grundpreis + km * TAXI_PREISE.kmPreis;
+                                        const preisGross = preis + TAXI_PREISE.grossraumzuschlag;
+                                        return (
+                                            <tr key={route} className="hover:bg-gray-50">
+                                                <td className="px-3 py-2 text-gray-700">{von}</td>
+                                                <td className="px-3 py-2 text-gray-700">{nach}</td>
+                                                <td className="px-3 py-2 text-right font-medium">{km} km</td>
+                                                <td className="px-3 py-2 text-right font-bold text-green-700">{preis.toFixed(2)} €</td>
+                                                <td className="px-3 py-2 text-right font-bold text-blue-700">{preisGross.toFixed(2)} €</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
                         </div>
+                        <p className="text-xs text-gray-400 mt-3 italic">
+                            Ungefähre Entfernungen. Realer Preis nach geeichtem Taxameter. Bei nicht hinterlegten Strecken wird mit 10 km geschätzt.
+                        </p>
                     </div>
                 </div>
             );
@@ -3521,11 +3676,23 @@
                 return false;
             }
 
+            function getEntfernung() {
+                // Versuche bekannte Entfernung zu finden
+                const von = abholung === 'custom' ? null : abholung;
+                const nach = ziel === 'custom' ? null : ziel;
+                if (von && nach) {
+                    const key1 = `${von}|${nach}`;
+                    const key2 = `${nach}|${von}`;
+                    if (ENTFERNUNGEN[key1]) return ENTFERNUNGEN[key1];
+                    if (ENTFERNUNGEN[key2]) return ENTFERNUNGEN[key2];
+                }
+                return null; // unbekannt
+            }
+
             function berechnePreis() {
+                const km = getEntfernung() || 10; // Fallback 10km wenn unbekannt
                 let preis = TAXI_PREISE.grundpreis;
-                // Schätzung: ca. 10km pro Fahrt als Basis
-                preis += 10 * TAXI_PREISE.kmPreis;
-                if (istNacht()) preis += TAXI_PREISE.nachtzuschlag;
+                preis += km * TAXI_PREISE.kmPreis;
                 if (fahrzeugTyp === 'grossraum') preis += TAXI_PREISE.grossraumzuschlag;
                 return preis;
             }
@@ -3685,10 +3852,15 @@
                 await new Promise(r => setTimeout(r, 400));
 
                 const preis = berechnePreis();
+                const km = getEntfernung();
                 const preisDetails = [];
                 preisDetails.push(`Grundpreis: ${TAXI_PREISE.grundpreis.toFixed(2)} €`);
-                preisDetails.push(`Strecke (ca. 10km): ${(10 * TAXI_PREISE.kmPreis).toFixed(2)} €`);
-                if (istNacht()) preisDetails.push(`Nachtzuschlag: ${TAXI_PREISE.nachtzuschlag.toFixed(2)} €`);
+                if (km) {
+                    preisDetails.push(`Strecke ${km} km x ${TAXI_PREISE.kmPreis.toFixed(2)} €/km = ${(km * TAXI_PREISE.kmPreis).toFixed(2)} €`);
+                } else {
+                    preisDetails.push(`Strecke ca. 10 km (geschätzt) = ${(10 * TAXI_PREISE.kmPreis).toFixed(2)} €`);
+                }
+                if (istNacht()) preisDetails.push(`Nachttarif aktiv (Mo-Sa 22-06 / So ganztags)`);
                 if (fahrzeugTyp === 'grossraum') preisDetails.push(`Großraumzuschlag: ${TAXI_PREISE.grossraumzuschlag.toFixed(2)} €`);
                 protokoll[protokoll.length - 1].status = 'ok';
                 protokoll[protokoll.length - 1].detail = `Geschätzter Preis: ${preis.toFixed(2)} € (${preisDetails.join(' + ')})`;
@@ -4245,13 +4417,35 @@
                                     {/* Preisschätzung */}
                                     <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
                                         <div className="flex justify-between items-center">
-                                            <span className="text-gray-700">Geschätzter Preis:</span>
+                                            <span className="text-gray-700">Geschätzter Fahrpreis:</span>
                                             <span className="text-2xl font-bold text-gray-800">ca. {berechnePreis().toFixed(2)} €</span>
                                         </div>
-                                        <p className="text-xs text-gray-500 mt-1">
-                                            Grundpreis {TAXI_PREISE.grundpreis.toFixed(2)} € + {TAXI_PREISE.kmPreis.toFixed(2)} €/km
-                                            {istNacht() && ` + ${TAXI_PREISE.nachtzuschlag.toFixed(2)} € Nachtzuschlag`}
-                                            {fahrzeugTyp === 'grossraum' && ` + ${TAXI_PREISE.grossraumzuschlag.toFixed(2)} € Großraumzuschlag`}
+                                        <div className="text-xs text-gray-500 mt-2 space-y-1">
+                                            <div className="flex justify-between">
+                                                <span>Grundpreis (Einsteiggebühr):</span>
+                                                <span className="font-medium">{TAXI_PREISE.grundpreis.toFixed(2)} €</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span>Strecke ({getEntfernung() ? `${getEntfernung()} km` : 'ca. 10 km geschätzt'} x {TAXI_PREISE.kmPreis.toFixed(2)} €/km):</span>
+                                                <span className="font-medium">{((getEntfernung() || 10) * TAXI_PREISE.kmPreis).toFixed(2)} €</span>
+                                            </div>
+                                            {fahrzeugTyp === 'grossraum' && (
+                                                <div className="flex justify-between">
+                                                    <span>Großraumzuschlag:</span>
+                                                    <span className="font-medium">{TAXI_PREISE.grossraumzuschlag.toFixed(2)} €</span>
+                                                </div>
+                                            )}
+                                            {istNacht() && (
+                                                <div className="flex justify-between text-orange-600">
+                                                    <span>Nachttarif aktiv (Mo-Sa 22-06 Uhr / So ganztags):</span>
+                                                    <span className="font-medium">über Taxameter</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-gray-400 mt-2 italic">
+                                            Offizieller Tarif Landkreis Vorpommern-Greifswald.
+                                            {!getEntfernung() && ' Strecke geschätzt - realer Preis nach Taxameter.'}
+                                            {getEntfernung() && ' Realer Preis nach Taxameter.'}
                                         </p>
                                     </div>
 
