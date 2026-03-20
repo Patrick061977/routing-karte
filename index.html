@@ -3474,6 +3474,10 @@
             const [buchungsListe, setBuchungsListe] = useState([]);
             const [showListe, setShowListe] = useState(false);
             const [personenAnzahl, setPersonenAnzahl] = useState(1);
+            const [expandedBuchung, setExpandedBuchung] = useState(null); // Protokoll-Ansicht in Liste
+            const [pruefProtokoll, setPruefProtokoll] = useState([]); // Live-Prüfprotokoll
+            const [pruefLaeuft, setPruefLaeuft] = useState(false); // Prüfung aktiv?
+            const [pruefFehler, setPruefFehler] = useState(false); // Prüfung fehlgeschlagen?
 
             // Buchungen aus Firebase laden
             useEffect(() => {
@@ -3526,31 +3530,262 @@
                 return preis;
             }
 
+            // Prüfschritt zum Protokoll hinzufügen (mit Verzögerung für Live-Effekt)
+            function addPruefSchritt(name, status, detail, protokoll) {
+                const neuerSchritt = {
+                    id: Date.now() + Math.random(),
+                    name,
+                    status, // 'prueft' | 'ok' | 'warnung' | 'fehler'
+                    detail,
+                    zeit: new Date().toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', second: '2-digit', fractionalSecondDigits: 3 }),
+                };
+                return [...protokoll, neuerSchritt];
+            }
+
             async function buchungAbschicken() {
+                setPruefLaeuft(true);
+                setPruefFehler(false);
+                setSchritt(4); // Sofort zur Prüf-Ansicht wechseln
+                let protokoll = [];
+                let hatFehler = false;
+
+                // ========== PRÜFUNG 1: Pflichtfelder ==========
+                protokoll = addPruefSchritt('Pflichtfelder prüfen', 'prueft', 'Abholung & Ziel vorhanden?', protokoll);
+                setPruefProtokoll([...protokoll]);
+                await new Promise(r => setTimeout(r, 400));
+
+                const abholText = getAbholText();
+                const zielText = getZielText();
+
+                if (!abholText || abholText.trim().length < 2) {
+                    protokoll[protokoll.length - 1].status = 'fehler';
+                    protokoll[protokoll.length - 1].detail = 'Abholadresse fehlt oder zu kurz';
+                    setPruefProtokoll([...protokoll]);
+                    hatFehler = true;
+                } else if (!zielText || zielText.trim().length < 2) {
+                    protokoll[protokoll.length - 1].status = 'fehler';
+                    protokoll[protokoll.length - 1].detail = 'Zieladresse fehlt oder zu kurz';
+                    setPruefProtokoll([...protokoll]);
+                    hatFehler = true;
+                } else {
+                    protokoll[protokoll.length - 1].status = 'ok';
+                    protokoll[protokoll.length - 1].detail = `Von: "${abholText}" → Nach: "${zielText}"`;
+                    setPruefProtokoll([...protokoll]);
+                }
+
+                // ========== PRÜFUNG 2: Gleiches Ziel ==========
+                await new Promise(r => setTimeout(r, 300));
+                protokoll = addPruefSchritt('Identische Adressen prüfen', 'prueft', 'Abholung ≠ Ziel?', protokoll);
+                setPruefProtokoll([...protokoll]);
+                await new Promise(r => setTimeout(r, 400));
+
+                if (abholText === zielText) {
+                    protokoll[protokoll.length - 1].status = 'fehler';
+                    protokoll[protokoll.length - 1].detail = 'Abholung und Ziel sind identisch!';
+                    setPruefProtokoll([...protokoll]);
+                    hatFehler = true;
+                } else {
+                    protokoll[protokoll.length - 1].status = 'ok';
+                    protokoll[protokoll.length - 1].detail = 'Adressen sind unterschiedlich';
+                    setPruefProtokoll([...protokoll]);
+                }
+
+                // ========== PRÜFUNG 3: Zeitpunkt Validierung ==========
+                await new Promise(r => setTimeout(r, 300));
+                protokoll = addPruefSchritt('Zeitpunkt validieren', 'prueft', 'Liegt Zeitpunkt in der Zukunft?', protokoll);
+                setPruefProtokoll([...protokoll]);
+                await new Promise(r => setTimeout(r, 400));
+
+                if (zeitpunkt === 'spaeter') {
+                    const gewuenschteZeit = new Date(`${customDatum}T${customZeit || '00:00'}`);
+                    const jetzt = new Date();
+                    if (gewuenschteZeit < jetzt) {
+                        protokoll[protokoll.length - 1].status = 'fehler';
+                        protokoll[protokoll.length - 1].detail = `Zeitpunkt ${customDatum} ${customZeit} liegt in der Vergangenheit!`;
+                        setPruefProtokoll([...protokoll]);
+                        hatFehler = true;
+                    } else if (!customZeit) {
+                        protokoll[protokoll.length - 1].status = 'warnung';
+                        protokoll[protokoll.length - 1].detail = 'Keine Uhrzeit angegeben - wird als 00:00 interpretiert';
+                        setPruefProtokoll([...protokoll]);
+                    } else {
+                        const diffMinuten = Math.round((gewuenschteZeit - jetzt) / 60000);
+                        protokoll[protokoll.length - 1].status = 'ok';
+                        protokoll[protokoll.length - 1].detail = `Vorbestellung für ${customDatum} ${customZeit} (in ${diffMinuten} Min.)`;
+                        setPruefProtokoll([...protokoll]);
+                    }
+                } else {
+                    protokoll[protokoll.length - 1].status = 'ok';
+                    protokoll[protokoll.length - 1].detail = 'Sofort-Buchung - keine Zeitprüfung nötig';
+                    setPruefProtokoll([...protokoll]);
+                }
+
+                // ========== PRÜFUNG 4: Fahrzeugtyp & Personen ==========
+                await new Promise(r => setTimeout(r, 300));
+                protokoll = addPruefSchritt('Fahrzeugtyp prüfen', 'prueft', 'Passt Personenanzahl zum Fahrzeug?', protokoll);
+                setPruefProtokoll([...protokoll]);
+                await new Promise(r => setTimeout(r, 400));
+
+                if (fahrzeugTyp === 'standard' && personenAnzahl > 4) {
+                    protokoll[protokoll.length - 1].status = 'warnung';
+                    protokoll[protokoll.length - 1].detail = `${personenAnzahl} Personen passen nicht in Standard-Taxi (max. 4) - automatisch auf Großraum geändert`;
+                    setPruefProtokoll([...protokoll]);
+                    // Auto-Korrektur
+                    setFahrzeugTyp('grossraum');
+                } else {
+                    protokoll[protokoll.length - 1].status = 'ok';
+                    protokoll[protokoll.length - 1].detail = `${fahrzeugTyp === 'grossraum' ? 'Großraum' : 'Standard'}-Taxi für ${personenAnzahl} Person(en)`;
+                    setPruefProtokoll([...protokoll]);
+                }
+
+                // ========== PRÜFUNG 5: Duplikat-Check ==========
+                await new Promise(r => setTimeout(r, 300));
+                protokoll = addPruefSchritt('Duplikat-Erkennung', 'prueft', 'Gibt es eine ähnliche Buchung in den letzten 30 Minuten?', protokoll);
+                setPruefProtokoll([...protokoll]);
+                await new Promise(r => setTimeout(r, 500));
+
+                const vor30Min = new Date(Date.now() - 30 * 60 * 1000).toISOString();
+                const duplikat = buchungsListe.find(b =>
+                    b.abholung === abholText &&
+                    b.ziel === zielText &&
+                    b.erstelltAm > vor30Min &&
+                    b.status !== 'storniert'
+                );
+
+                if (duplikat) {
+                    protokoll[protokoll.length - 1].status = 'warnung';
+                    protokoll[protokoll.length - 1].detail = `Mögliches Duplikat gefunden! Gleiche Route wurde um ${new Date(duplikat.erstelltAm).toLocaleTimeString('de-DE')} gebucht (${duplikat.kundenName})`;
+                    setPruefProtokoll([...protokoll]);
+                } else {
+                    protokoll[protokoll.length - 1].status = 'ok';
+                    protokoll[protokoll.length - 1].detail = 'Keine Duplikate in den letzten 30 Minuten';
+                    setPruefProtokoll([...protokoll]);
+                }
+
+                // ========== PRÜFUNG 6: Nachtfahrt-Check ==========
+                await new Promise(r => setTimeout(r, 300));
+                protokoll = addPruefSchritt('Nachtfahrt-Zuschlag', 'prueft', 'Fällt die Fahrt in den Nachtzeitraum (22-06 Uhr)?', protokoll);
+                setPruefProtokoll([...protokoll]);
+                await new Promise(r => setTimeout(r, 400));
+
+                if (istNacht()) {
+                    protokoll[protokoll.length - 1].status = 'warnung';
+                    protokoll[protokoll.length - 1].detail = `Nachtfahrt erkannt - Zuschlag von ${TAXI_PREISE.nachtzuschlag.toFixed(2)} € wird berechnet`;
+                    setPruefProtokoll([...protokoll]);
+                } else {
+                    protokoll[protokoll.length - 1].status = 'ok';
+                    protokoll[protokoll.length - 1].detail = 'Tagfahrt - kein Nachtzuschlag';
+                    setPruefProtokoll([...protokoll]);
+                }
+
+                // ========== PRÜFUNG 7: Preisberechnung ==========
+                await new Promise(r => setTimeout(r, 300));
+                protokoll = addPruefSchritt('Preisberechnung', 'prueft', 'Geschätzten Fahrpreis berechnen...', protokoll);
+                setPruefProtokoll([...protokoll]);
+                await new Promise(r => setTimeout(r, 400));
+
+                const preis = berechnePreis();
+                const preisDetails = [];
+                preisDetails.push(`Grundpreis: ${TAXI_PREISE.grundpreis.toFixed(2)} €`);
+                preisDetails.push(`Strecke (ca. 10km): ${(10 * TAXI_PREISE.kmPreis).toFixed(2)} €`);
+                if (istNacht()) preisDetails.push(`Nachtzuschlag: ${TAXI_PREISE.nachtzuschlag.toFixed(2)} €`);
+                if (fahrzeugTyp === 'grossraum') preisDetails.push(`Großraumzuschlag: ${TAXI_PREISE.grossraumzuschlag.toFixed(2)} €`);
+                protokoll[protokoll.length - 1].status = 'ok';
+                protokoll[protokoll.length - 1].detail = `Geschätzter Preis: ${preis.toFixed(2)} € (${preisDetails.join(' + ')})`;
+                setPruefProtokoll([...protokoll]);
+
+                // ========== PRÜFUNG 8: Telefonnummer-Format ==========
+                await new Promise(r => setTimeout(r, 300));
+                protokoll = addPruefSchritt('Kontaktdaten prüfen', 'prueft', 'Telefonnummer-Format valide?', protokoll);
+                setPruefProtokoll([...protokoll]);
+                await new Promise(r => setTimeout(r, 400));
+
+                if (kundenTelefon && kundenTelefon.length > 0) {
+                    const telefonBereinigt = kundenTelefon.replace(/[\s\-\(\)\/]/g, '');
+                    if (telefonBereinigt.length < 6) {
+                        protokoll[protokoll.length - 1].status = 'warnung';
+                        protokoll[protokoll.length - 1].detail = `Telefonnummer "${kundenTelefon}" scheint zu kurz - Rückruf evtl. nicht möglich`;
+                        setPruefProtokoll([...protokoll]);
+                    } else if (!/^[\+0-9]/.test(telefonBereinigt)) {
+                        protokoll[protokoll.length - 1].status = 'warnung';
+                        protokoll[protokoll.length - 1].detail = `Telefonnummer "${kundenTelefon}" hat ungewöhnliches Format`;
+                        setPruefProtokoll([...protokoll]);
+                    } else {
+                        protokoll[protokoll.length - 1].status = 'ok';
+                        protokoll[protokoll.length - 1].detail = `Telefon: ${kundenTelefon} - Format OK`;
+                        setPruefProtokoll([...protokoll]);
+                    }
+                } else {
+                    protokoll[protokoll.length - 1].status = 'warnung';
+                    protokoll[protokoll.length - 1].detail = 'Keine Telefonnummer angegeben - kein Rückruf bei Problemen möglich';
+                    setPruefProtokoll([...protokoll]);
+                }
+
+                // ========== ABBRUCH BEI FEHLER ==========
+                if (hatFehler) {
+                    await new Promise(r => setTimeout(r, 500));
+                    protokoll = addPruefSchritt('ABGEBROCHEN', 'fehler', 'Buchung wurde NICHT erstellt - bitte Fehler oben korrigieren', protokoll);
+                    setPruefProtokoll([...protokoll]);
+                    setPruefLaeuft(false);
+                    setPruefFehler(true);
+                    return;
+                }
+
+                // ========== PRÜFUNG 9: Firebase-Verbindung ==========
+                await new Promise(r => setTimeout(r, 300));
+                protokoll = addPruefSchritt('Firebase-Verbindung', 'prueft', 'Verbindung zur Datenbank testen...', protokoll);
+                setPruefProtokoll([...protokoll]);
+
                 const buchung = {
-                    abholung: getAbholText(),
-                    ziel: getZielText(),
+                    abholung: abholText,
+                    ziel: zielText,
                     kundenName: kundenName || 'Gast',
                     kundenTelefon: kundenTelefon || '-',
                     zeitpunkt: zeitpunkt === 'sofort' ? 'Sofort' : `${customDatum} ${customZeit}`,
-                    fahrzeugTyp,
+                    fahrzeugTyp: personenAnzahl > 4 ? 'grossraum' : fahrzeugTyp,
                     personenAnzahl,
                     bemerkung,
                     status: 'neu',
-                    geschaetzterPreis: berechnePreis().toFixed(2),
+                    geschaetzterPreis: preis.toFixed(2),
                     erstelltAm: new Date().toISOString(),
+                    pruefProtokoll: protokoll.map(p => ({ name: p.name, status: p.status, detail: p.detail, zeit: p.zeit })),
                 };
 
                 try {
                     const docRef = await db.collection('taxi_buchungen').add(buchung);
                     buchung.id = docRef.id;
+
+                    protokoll[protokoll.length - 1].status = 'ok';
+                    protokoll[protokoll.length - 1].detail = `Erfolgreich gespeichert (ID: ${docRef.id.substring(0, 8)}...)`;
+                    setPruefProtokoll([...protokoll]);
+
+                    // ========== PRÜFUNG 10: Bestätigung ==========
+                    await new Promise(r => setTimeout(r, 400));
+                    const fehlerCount = protokoll.filter(p => p.status === 'fehler').length;
+                    const warnungCount = protokoll.filter(p => p.status === 'warnung').length;
+                    const okCount = protokoll.filter(p => p.status === 'ok').length;
+
+                    protokoll = addPruefSchritt(
+                        'BUCHUNG ERFOLGREICH',
+                        'ok',
+                        `Alle Prüfungen abgeschlossen: ${okCount} bestanden, ${warnungCount} Warnung(en), ${fehlerCount} Fehler`,
+                        protokoll
+                    );
+                    setPruefProtokoll([...protokoll]);
+
                     setLetzteBestellung(buchung);
-                    setSchritt(4);
                     await loadBuchungen();
                 } catch (e) {
-                    console.error('Buchung fehlgeschlagen:', e);
-                    alert('Buchung konnte nicht gespeichert werden: ' + e.message);
+                    protokoll[protokoll.length - 1].status = 'fehler';
+                    protokoll[protokoll.length - 1].detail = `Firebase-Fehler: ${e.message}`;
+                    setPruefProtokoll([...protokoll]);
+
+                    protokoll = addPruefSchritt('BUCHUNG FEHLGESCHLAGEN', 'fehler', 'Daten konnten nicht gespeichert werden - bitte erneut versuchen', protokoll);
+                    setPruefProtokoll([...protokoll]);
+                    setPruefFehler(true);
                 }
+
+                setPruefLaeuft(false);
             }
 
             function neueBuchung() {
@@ -3568,6 +3803,9 @@
                 setBemerkung('');
                 setPersonenAnzahl(1);
                 setLetzteBestellung(null);
+                setPruefProtokoll([]);
+                setPruefLaeuft(false);
+                setPruefFehler(false);
             }
 
             async function updateBuchungStatus(id, neuerStatus) {
@@ -3716,9 +3954,44 @@
                                                             Storno
                                                         </button>
                                                     )}
+                                                    {b.pruefProtokoll && (
+                                                        <button onClick={() => setExpandedBuchung(expandedBuchung === b.id ? null : b.id)}
+                                                            className={`px-2 py-1 text-xs rounded ${expandedBuchung === b.id ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
+                                                            {expandedBuchung === b.id ? 'Protokoll ▲' : 'Protokoll ▼'}
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
+                                        {/* Expandiertes Prüfprotokoll */}
+                                        {expandedBuchung === b.id && b.pruefProtokoll && (
+                                            <tr>
+                                                <td colSpan="6" className="px-4 py-3 bg-gray-50">
+                                                    <div className="text-xs font-bold text-gray-700 mb-2">Prüfprotokoll der Bestellung:</div>
+                                                    <div className="space-y-1">
+                                                        {b.pruefProtokoll.map((p, pi) => (
+                                                            <div key={pi} className={`flex items-center gap-2 text-xs px-2 py-1 rounded ${
+                                                                p.status === 'ok' ? 'bg-green-50 text-green-700' :
+                                                                p.status === 'warnung' ? 'bg-yellow-50 text-yellow-700' :
+                                                                p.status === 'fehler' ? 'bg-red-50 text-red-700' :
+                                                                'bg-blue-50 text-blue-700'
+                                                            }`}>
+                                                                <span>
+                                                                    {p.status === 'ok' && '✅'}
+                                                                    {p.status === 'warnung' && '⚠️'}
+                                                                    {p.status === 'fehler' && '❌'}
+                                                                    {p.status === 'prueft' && '🔄'}
+                                                                </span>
+                                                                <span className="font-semibold">{p.name}</span>
+                                                                <span className="text-gray-400">|</span>
+                                                                <span>{p.detail}</span>
+                                                                <span className="ml-auto text-gray-400">{p.zeit}</span>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        )}
                                     ))}
                                     {buchungsListe.length === 0 && (
                                         <tr>
@@ -4000,53 +4273,137 @@
                                 </div>
                             )}
 
-                            {/* SCHRITT 4: Bestätigung */}
-                            {schritt === 4 && letzteBestellung && (
-                                <div className="bg-white rounded-xl shadow-lg p-8 text-center">
-                                    <div className="text-6xl mb-4">✅</div>
-                                    <h3 className="text-2xl font-bold text-green-700 mb-2">Taxi bestellt!</h3>
-                                    <p className="text-gray-600 mb-6">Ihre Buchung wurde erfolgreich aufgenommen.</p>
+                            {/* SCHRITT 4: LIVE-PRÜFPROTOKOLL + Bestätigung */}
+                            {schritt === 4 && (
+                                <div className="bg-white rounded-xl shadow-lg p-6">
+                                    <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                        {pruefLaeuft && <span className="animate-spin text-blue-600">⚙️</span>}
+                                        {!pruefLaeuft && !pruefFehler && pruefProtokoll.length > 0 && <span>✅</span>}
+                                        {pruefFehler && <span>❌</span>}
+                                        Bestellungs-Prüfprotokoll
+                                        {pruefLaeuft && <span className="text-sm font-normal text-blue-600 ml-2">Prüfung läuft...</span>}
+                                    </h3>
 
-                                    <div className="bg-gray-50 rounded-lg p-6 max-w-md mx-auto text-left mb-6">
-                                        <div className="space-y-2 text-sm">
-                                            <div className="flex justify-between">
-                                                <span className="text-gray-500">Abholung:</span>
-                                                <span className="font-medium">{letzteBestellung.abholung}</span>
+                                    {/* Live-Protokoll-Liste */}
+                                    <div className="space-y-2 mb-6">
+                                        {pruefProtokoll.map((p, i) => (
+                                            <div
+                                                key={p.id}
+                                                className={`flex items-start gap-3 p-3 rounded-lg border-l-4 transition-all ${
+                                                    p.status === 'ok' ? 'bg-green-50 border-green-500' :
+                                                    p.status === 'warnung' ? 'bg-yellow-50 border-yellow-500' :
+                                                    p.status === 'fehler' ? 'bg-red-50 border-red-500' :
+                                                    'bg-blue-50 border-blue-500'
+                                                }`}
+                                            >
+                                                {/* Status-Icon */}
+                                                <div className="text-xl flex-shrink-0 mt-0.5">
+                                                    {p.status === 'ok' && '✅'}
+                                                    {p.status === 'warnung' && '⚠️'}
+                                                    {p.status === 'fehler' && '❌'}
+                                                    {p.status === 'prueft' && <span className="animate-spin inline-block">🔄</span>}
+                                                </div>
+
+                                                {/* Inhalt */}
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="font-semibold text-sm">{p.name}</span>
+                                                        <span className="text-xs text-gray-400">{p.zeit}</span>
+                                                    </div>
+                                                    <p className={`text-sm mt-0.5 ${
+                                                        p.status === 'ok' ? 'text-green-700' :
+                                                        p.status === 'warnung' ? 'text-yellow-700' :
+                                                        p.status === 'fehler' ? 'text-red-700' :
+                                                        'text-blue-700'
+                                                    }`}>
+                                                        {p.detail}
+                                                    </p>
+                                                </div>
+
+                                                {/* Nummer */}
+                                                <div className="text-xs text-gray-400 font-mono flex-shrink-0">
+                                                    #{i + 1}
+                                                </div>
                                             </div>
-                                            <div className="flex justify-between">
-                                                <span className="text-gray-500">Ziel:</span>
-                                                <span className="font-medium">{letzteBestellung.ziel}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="text-gray-500">Wann:</span>
-                                                <span className="font-medium">{letzteBestellung.zeitpunkt}</span>
-                                            </div>
-                                            <div className="flex justify-between">
-                                                <span className="text-gray-500">Fahrzeug:</span>
-                                                <span className="font-medium">{letzteBestellung.fahrzeugTyp === 'grossraum' ? 'Großraum' : 'Standard'}</span>
-                                            </div>
-                                            <hr className="my-2" />
-                                            <div className="flex justify-between text-lg font-bold">
-                                                <span>Preis ca.:</span>
-                                                <span>{letzteBestellung.geschaetzterPreis} €</span>
+                                        ))}
+                                    </div>
+
+                                    {/* Zusammenfassung wenn fertig */}
+                                    {!pruefLaeuft && pruefProtokoll.length > 0 && (
+                                        <div className={`rounded-lg p-4 mb-6 ${pruefFehler ? 'bg-red-100 border border-red-300' : 'bg-green-100 border border-green-300'}`}>
+                                            <div className="flex items-center gap-4 justify-center text-sm font-semibold">
+                                                <span className="flex items-center gap-1">
+                                                    ✅ {pruefProtokoll.filter(p => p.status === 'ok').length} OK
+                                                </span>
+                                                <span className="flex items-center gap-1">
+                                                    ⚠️ {pruefProtokoll.filter(p => p.status === 'warnung').length} Warnungen
+                                                </span>
+                                                <span className="flex items-center gap-1">
+                                                    ❌ {pruefProtokoll.filter(p => p.status === 'fehler').length} Fehler
+                                                </span>
                                             </div>
                                         </div>
-                                    </div>
+                                    )}
 
-                                    <div className="flex gap-4 justify-center">
-                                        <button
-                                            onClick={neueBuchung}
-                                            className="px-8 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
-                                        >
-                                            Neue Buchung
-                                        </button>
-                                        <button
-                                            onClick={() => setShowListe(true)}
-                                            className="px-8 py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300"
-                                        >
-                                            Alle Buchungen
-                                        </button>
-                                    </div>
+                                    {/* Buchungsdetails wenn erfolgreich */}
+                                    {!pruefLaeuft && !pruefFehler && letzteBestellung && (
+                                        <div className="bg-gray-50 rounded-lg p-6 max-w-lg mx-auto mb-6">
+                                            <h4 className="font-bold text-center text-green-700 text-lg mb-3">Buchung erfolgreich erstellt</h4>
+                                            <div className="space-y-2 text-sm">
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-500">Buchungs-ID:</span>
+                                                    <span className="font-mono text-xs">{letzteBestellung.id}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-500">Abholung:</span>
+                                                    <span className="font-medium">{letzteBestellung.abholung}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-500">Ziel:</span>
+                                                    <span className="font-medium">{letzteBestellung.ziel}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-500">Wann:</span>
+                                                    <span className="font-medium">{letzteBestellung.zeitpunkt}</span>
+                                                </div>
+                                                <div className="flex justify-between">
+                                                    <span className="text-gray-500">Fahrzeug:</span>
+                                                    <span className="font-medium">{letzteBestellung.fahrzeugTyp === 'grossraum' ? 'Großraum' : 'Standard'}</span>
+                                                </div>
+                                                <hr className="my-2" />
+                                                <div className="flex justify-between text-lg font-bold">
+                                                    <span>Preis ca.:</span>
+                                                    <span>{letzteBestellung.geschaetzterPreis} €</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Buttons */}
+                                    {!pruefLaeuft && (
+                                        <div className="flex gap-4 justify-center">
+                                            {pruefFehler && (
+                                                <button
+                                                    onClick={() => { setSchritt(3); setPruefProtokoll([]); setPruefFehler(false); }}
+                                                    className="px-8 py-3 bg-orange-600 text-white rounded-lg font-semibold hover:bg-orange-700"
+                                                >
+                                                    ← Zurück & korrigieren
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={neueBuchung}
+                                                className="px-8 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                                            >
+                                                Neue Buchung
+                                            </button>
+                                            <button
+                                                onClick={() => setShowListe(true)}
+                                                className="px-8 py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300"
+                                            >
+                                                Alle Buchungen
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             )}
                         </div>
