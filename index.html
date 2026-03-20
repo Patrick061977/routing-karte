@@ -147,10 +147,35 @@
             sonstiges: ['rechnung', 'invoice', 'beleg', 'quittung'],
         };
 
-        const VERSION = "8.1.0 - Dateiname-Templates + OCR-Struktur-Analyse!";
+        const VERSION = "9.0.0 - Taxi-Buchungs-Workflow + Buchhaltung";
+
+        // Bekannte Orte in Heringsdorf/Usedom für Schnellauswahl
+        const BEKANNTE_ORTE = [
+            { name: 'Bahnhof Heringsdorf', adresse: 'Bahnhofstraße 1, 17424 Heringsdorf', icon: '🚂' },
+            { name: 'Flughafen Heringsdorf', adresse: 'Flughafen, 17429 Heringsdorf', icon: '✈️' },
+            { name: 'Seebrücke Heringsdorf', adresse: 'Seebrücke, 17424 Heringsdorf', icon: '🌊' },
+            { name: 'Seebrücke Ahlbeck', adresse: 'Seebrücke, 17419 Ahlbeck', icon: '🌊' },
+            { name: 'Seebrücke Bansin', adresse: 'Seebrücke, 17429 Bansin', icon: '🌊' },
+            { name: 'Hotel Maritim', adresse: 'Strandpromenade, 17424 Heringsdorf', icon: '🏨' },
+            { name: 'Klinik Heringsdorf', adresse: 'Setheweg 11, 17424 Heringsdorf', icon: '🏥' },
+            { name: 'REWE Heringsdorf', adresse: 'Brunnenstraße 18, 17424 Heringsdorf', icon: '🛒' },
+            { name: 'Karls Erlebnis-Dorf', adresse: 'Zum Erlebnis-Dorf 1, 17449 Koserow', icon: '🎡' },
+            { name: 'Peenemünde Museum', adresse: 'Im Kraftwerk, 17449 Peenemünde', icon: '🏛️' },
+            { name: 'Wolgast Bahnhof', adresse: 'Bahnhofstraße, 17438 Wolgast', icon: '🚂' },
+            { name: 'Zinnowitz Zentrum', adresse: 'Hauptstraße, 17454 Zinnowitz', icon: '📍' },
+        ];
+
+        // Taxi-Preise (Grundpreis + km-Preis)
+        const TAXI_PREISE = {
+            grundpreis: 3.90,
+            kmPreis: 2.30,
+            wartezeit: 0.50, // pro Minute
+            nachtzuschlag: 5.00, // 22-6 Uhr
+            grossraumzuschlag: 5.00
+        };
 
         function BuchhaltungApp() {
-            const [activeTab, setActiveTab] = useState('dokumente'); // NEU: Dokumente als Standard
+            const [activeTab, setActiveTab] = useState('taxi'); // Taxi-Buchung als Standard
             const [dokumente, setDokumente] = useState([]);
             const [ordner, setOrdner] = useState([]);
             const [selectedOrdner, setSelectedOrdner] = useState('alle');
@@ -172,6 +197,7 @@
             const [dublettenWarnung, setDublettenWarnung] = useState(null);
             const [customOrdner, setCustomOrdner] = useState([]); // NEU: Benutzerdefinierte Ordner
             const [showCleanupModal, setShowCleanupModal] = useState(false); // NEU: Cleanup Modal
+            const [taxiBuchungen, setTaxiBuchungen] = useState([]); // Taxi-Buchungen
 
             useEffect(() => {
                 loadData();
@@ -1134,6 +1160,8 @@
                         <div className="container mx-auto px-6">
                             <div className="flex space-x-1">
                                 {[
+                                    { id: 'taxi', name: 'Taxi-Buchung', icon: '🚕' },
+                                    { id: 'workflow', name: 'Ablaufplan', icon: '🗺️' },
                                     { id: 'dashboard', name: 'Dashboard', icon: '📊' },
                                     { id: 'dokumente', name: 'Dokumente', icon: '📁' },
                                     { id: 'kontierung', name: 'Kontierung', icon: '🔢' },
@@ -1158,6 +1186,18 @@
 
                     {/* Main Content */}
                     <main className="container mx-auto px-6 py-8">
+                        {activeTab === 'taxi' && (
+                            <TaxiBuchungView
+                                buchungen={taxiBuchungen}
+                                setBuchungen={setTaxiBuchungen}
+                                db={db}
+                            />
+                        )}
+
+                        {activeTab === 'workflow' && (
+                            <WorkflowDiagramm />
+                        )}
+
                         {activeTab === 'dashboard' && (
                             <Dashboard 
                                 stats={stats} 
@@ -3118,6 +3158,899 @@
                             💾 Speichern
                         </button>
                     </div>
+                </div>
+            );
+        }
+
+        // ============================================
+        // WORKFLOW-DIAGRAMM - Visueller Ablaufplan
+        // ============================================
+        function WorkflowDiagramm() {
+            const schritte = [
+                {
+                    id: 1,
+                    titel: 'Kunde öffnet App',
+                    beschreibung: 'Taxi-Buchung Tab wird automatisch angezeigt',
+                    icon: '📱',
+                    farbe: 'bg-blue-500',
+                    klicks: 0,
+                    probleme: [],
+                },
+                {
+                    id: 2,
+                    titel: 'Abholort wählen',
+                    beschreibung: 'Schnellauswahl aus bekannten Orten ODER freie Adresseingabe',
+                    icon: '📍',
+                    farbe: 'bg-green-500',
+                    klicks: 1,
+                    probleme: [
+                        { text: 'Adresse nicht in Schnellauswahl', loesung: 'Freie Texteingabe als Fallback' },
+                        { text: 'Tippfehler in Adresse', loesung: 'Dispatcher prüft vor Annahme' },
+                    ],
+                },
+                {
+                    id: 3,
+                    titel: 'Zielort wählen',
+                    beschreibung: 'Gleiche Auswahl wie Abholung - ein Klick auf bekannten Ort reicht',
+                    icon: '🏁',
+                    farbe: 'bg-yellow-500',
+                    klicks: 1,
+                    probleme: [
+                        { text: 'Ziel außerhalb Usedom', loesung: 'Preis wird höher, Warnung anzeigen' },
+                    ],
+                },
+                {
+                    id: 4,
+                    titel: 'Details festlegen',
+                    beschreibung: 'Sofort/Vorbestellen, Standard/Großraum, Personen, Name & Telefon (optional)',
+                    icon: '⚙️',
+                    farbe: 'bg-purple-500',
+                    klicks: '1-3',
+                    probleme: [
+                        { text: 'Großraum nicht verfügbar', loesung: 'Status-Prüfung vor Buchung, Alternative anbieten' },
+                        { text: 'Zeitpunkt in der Vergangenheit', loesung: 'Validierung: nur Zukunft erlauben' },
+                    ],
+                },
+                {
+                    id: 5,
+                    titel: '"Taxi bestellen!" Button',
+                    beschreibung: 'Ein Klick → Buchung wird in Firebase gespeichert',
+                    icon: '✅',
+                    farbe: 'bg-green-600',
+                    klicks: 1,
+                    probleme: [
+                        { text: 'Firebase nicht erreichbar', loesung: 'Offline-Queue + Retry-Logik' },
+                        { text: 'Doppelklick / Doppelbuchung', loesung: 'Button nach Klick deaktivieren' },
+                    ],
+                },
+                {
+                    id: 6,
+                    titel: 'Bestätigung angezeigt',
+                    beschreibung: 'Zusammenfassung mit Route, Zeit und geschätztem Preis',
+                    icon: '📋',
+                    farbe: 'bg-blue-600',
+                    klicks: 0,
+                    probleme: [],
+                },
+            ];
+
+            const backendSchritte = [
+                {
+                    id: 'B1',
+                    titel: 'Neue Buchung in Firebase',
+                    beschreibung: 'Status: "neu" - wird in Echtzeit in der Buchungsliste angezeigt',
+                    icon: '🔥',
+                    farbe: 'bg-orange-500',
+                },
+                {
+                    id: 'B2',
+                    titel: 'Dispatcher sieht Buchung',
+                    beschreibung: 'Buchungsliste zeigt alle neuen Aufträge mit Annehmen/Storno-Buttons',
+                    icon: '👨‍💼',
+                    farbe: 'bg-indigo-500',
+                },
+                {
+                    id: 'B3',
+                    titel: 'Fahrer zuweisen',
+                    beschreibung: 'Status → "angenommen" - Fahrer wird informiert',
+                    icon: '🚕',
+                    farbe: 'bg-blue-500',
+                },
+                {
+                    id: 'B4',
+                    titel: 'Fahrt läuft',
+                    beschreibung: 'Status → "unterwegs" - Kunde kann Status sehen',
+                    icon: '🛣️',
+                    farbe: 'bg-purple-500',
+                },
+                {
+                    id: 'B5',
+                    titel: 'Fahrt abgeschlossen',
+                    beschreibung: 'Status → "abgeschlossen" - wird automatisch in Buchhaltung übernommen',
+                    icon: '💰',
+                    farbe: 'bg-green-600',
+                },
+            ];
+
+            const moeglicheProbleme = [
+                { kategorie: 'Netzwerk', problem: 'Keine Internetverbindung', loesung: 'Offline-Modus mit lokaler Speicherung, Sync bei Reconnect', schwere: 'hoch' },
+                { kategorie: 'Verfügbarkeit', problem: 'Kein Taxi verfügbar', loesung: 'Wartezeit-Schätzung anzeigen, Vorbestellung anbieten', schwere: 'mittel' },
+                { kategorie: 'Zahlung', problem: 'Kunde will mit Karte zahlen', loesung: 'Zahlungsart im Buchungsformular ergänzen', schwere: 'niedrig' },
+                { kategorie: 'Stornierung', problem: 'Kunde storniert nach Zuweisung', loesung: 'Storno-Gebühr definieren, Fahrer informieren', schwere: 'mittel' },
+                { kategorie: 'Adresse', problem: 'GPS-Koordinaten ungenau', loesung: 'Bekannte Orte als Referenzpunkte, Freitext als Backup', schwere: 'niedrig' },
+                { kategorie: 'Doppelbuchung', problem: 'Gleicher Kunde bucht zweimal', loesung: 'Duplikat-Erkennung basierend auf Telefon + Zeitraum', schwere: 'mittel' },
+            ];
+
+            return (
+                <div className="space-y-8">
+                    <h2 className="text-3xl font-bold text-gray-800">Taxi-Buchungs-Workflow - Ablaufplan</h2>
+
+                    {/* KUNDEN-WORKFLOW */}
+                    <div className="bg-white rounded-xl shadow-lg p-6">
+                        <h3 className="text-xl font-bold text-blue-700 mb-6 flex items-center gap-2">
+                            <span className="bg-blue-100 p-2 rounded-lg">👤</span>
+                            Kunden-Workflow (Frontend)
+                        </h3>
+                        <p className="text-gray-600 mb-6 text-sm">
+                            Ziel: <strong>Minimale Klicks</strong> - Der Kunde braucht nur <strong>3 Klicks</strong> für eine Standardbuchung
+                            (Abholort klicken → Zielort klicken → "Taxi bestellen!")
+                        </p>
+
+                        <div className="relative">
+                            {schritte.map((schritt, index) => (
+                                <div key={schritt.id} className="flex gap-4 mb-6 last:mb-0">
+                                    {/* Verbindungslinie */}
+                                    <div className="flex flex-col items-center">
+                                        <div className={`w-12 h-12 ${schritt.farbe} rounded-full flex items-center justify-center text-white text-xl shadow-lg`}>
+                                            {schritt.icon}
+                                        </div>
+                                        {index < schritte.length - 1 && (
+                                            <div className="w-0.5 h-full min-h-[20px] bg-gray-300 my-1"></div>
+                                        )}
+                                    </div>
+
+                                    {/* Inhalt */}
+                                    <div className="flex-1 pb-4">
+                                        <div className="flex items-center gap-3 mb-1">
+                                            <h4 className="font-bold text-lg">{schritt.titel}</h4>
+                                            <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-semibold">
+                                                {schritt.klicks === 0 ? 'Automatisch' : `${schritt.klicks} Klick${schritt.klicks !== 1 ? 's' : ''}`}
+                                            </span>
+                                        </div>
+                                        <p className="text-gray-600 text-sm mb-2">{schritt.beschreibung}</p>
+
+                                        {/* Probleme */}
+                                        {schritt.probleme.length > 0 && (
+                                            <div className="space-y-1">
+                                                {schritt.probleme.map((p, i) => (
+                                                    <div key={i} className="flex items-start gap-2 text-xs">
+                                                        <span className="text-red-500 font-bold mt-0.5">⚠️</span>
+                                                        <div>
+                                                            <span className="text-red-700 font-medium">{p.text}</span>
+                                                            <span className="text-gray-400 mx-1">→</span>
+                                                            <span className="text-green-700">{p.loesung}</span>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* BACKEND-WORKFLOW */}
+                    <div className="bg-white rounded-xl shadow-lg p-6">
+                        <h3 className="text-xl font-bold text-indigo-700 mb-6 flex items-center gap-2">
+                            <span className="bg-indigo-100 p-2 rounded-lg">🖥️</span>
+                            Dispatcher/Backend-Workflow
+                        </h3>
+
+                        <div className="flex flex-wrap gap-3">
+                            {backendSchritte.map((schritt, index) => (
+                                <React.Fragment key={schritt.id}>
+                                    <div className="bg-gray-50 rounded-lg p-4 flex-1 min-w-[180px] border-2 border-gray-200 hover:border-blue-300 transition-colors">
+                                        <div className={`w-10 h-10 ${schritt.farbe} rounded-full flex items-center justify-center text-white text-lg mb-2`}>
+                                            {schritt.icon}
+                                        </div>
+                                        <h4 className="font-bold text-sm mb-1">{schritt.titel}</h4>
+                                        <p className="text-xs text-gray-600">{schritt.beschreibung}</p>
+                                    </div>
+                                    {index < backendSchritte.length - 1 && (
+                                        <div className="flex items-center text-2xl text-gray-400 self-center">→</div>
+                                    )}
+                                </React.Fragment>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* STATUS-FLOW */}
+                    <div className="bg-white rounded-xl shadow-lg p-6">
+                        <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
+                            <span className="bg-gray-100 p-2 rounded-lg">🔄</span>
+                            Status-Flow der Buchung
+                        </h3>
+
+                        <div className="flex items-center justify-center gap-2 flex-wrap py-4">
+                            {[
+                                { status: 'Neu', farbe: 'bg-yellow-400', text: 'text-yellow-900' },
+                                { status: 'Angenommen', farbe: 'bg-blue-400', text: 'text-blue-900' },
+                                { status: 'Unterwegs', farbe: 'bg-purple-400', text: 'text-purple-900' },
+                                { status: 'Abgeschlossen', farbe: 'bg-green-500', text: 'text-green-900' },
+                            ].map((s, i, arr) => (
+                                <React.Fragment key={s.status}>
+                                    <div className={`${s.farbe} ${s.text} px-6 py-3 rounded-xl font-bold text-sm shadow-md`}>
+                                        {s.status}
+                                    </div>
+                                    {i < arr.length - 1 && (
+                                        <span className="text-3xl text-gray-400">→</span>
+                                    )}
+                                </React.Fragment>
+                            ))}
+                            <div className="ml-8 flex items-center gap-2">
+                                <span className="text-red-500 text-2xl">↗</span>
+                                <div className="bg-red-400 text-red-900 px-6 py-3 rounded-xl font-bold text-sm shadow-md">
+                                    Storniert
+                                </div>
+                                <span className="text-xs text-gray-500">(jederzeit vor "Unterwegs")</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* MÖGLICHE PROBLEME */}
+                    <div className="bg-white rounded-xl shadow-lg p-6">
+                        <h3 className="text-xl font-bold text-red-700 mb-4 flex items-center gap-2">
+                            <span className="bg-red-100 p-2 rounded-lg">⚠️</span>
+                            Mögliche Probleme & Lösungen
+                        </h3>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {moeglicheProbleme.map((p, i) => (
+                                <div key={i} className={`border-l-4 ${
+                                    p.schwere === 'hoch' ? 'border-red-500 bg-red-50' :
+                                    p.schwere === 'mittel' ? 'border-yellow-500 bg-yellow-50' :
+                                    'border-green-500 bg-green-50'
+                                } rounded-r-lg p-4`}>
+                                    <div className="flex items-center gap-2 mb-1">
+                                        <span className={`text-xs font-bold px-2 py-0.5 rounded ${
+                                            p.schwere === 'hoch' ? 'bg-red-200 text-red-800' :
+                                            p.schwere === 'mittel' ? 'bg-yellow-200 text-yellow-800' :
+                                            'bg-green-200 text-green-800'
+                                        }`}>{p.schwere.toUpperCase()}</span>
+                                        <span className="text-xs text-gray-500">{p.kategorie}</span>
+                                    </div>
+                                    <h4 className="font-bold text-sm">{p.problem}</h4>
+                                    <p className="text-xs text-gray-700 mt-1">
+                                        <span className="font-semibold text-green-700">Lösung:</span> {p.loesung}
+                                    </p>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* KLICK-ZUSAMMENFASSUNG */}
+                    <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-xl shadow-lg p-6 text-white">
+                        <h3 className="text-xl font-bold mb-4">Effizienz-Zusammenfassung</h3>
+                        <div className="grid grid-cols-3 gap-6 text-center">
+                            <div>
+                                <div className="text-4xl font-bold">3</div>
+                                <div className="text-blue-200 text-sm">Minimum Klicks</div>
+                                <div className="text-xs text-blue-300 mt-1">Schnellauswahl → Schnellauswahl → Bestellen</div>
+                            </div>
+                            <div>
+                                <div className="text-4xl font-bold">~30s</div>
+                                <div className="text-blue-200 text-sm">Buchungszeit</div>
+                                <div className="text-xs text-blue-300 mt-1">Bei bekannten Orten</div>
+                            </div>
+                            <div>
+                                <div className="text-4xl font-bold">5</div>
+                                <div className="text-blue-200 text-sm">Status-Stufen</div>
+                                <div className="text-xs text-blue-300 mt-1">Neu → Angenommen → Unterwegs → Fertig / Storniert</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ============================================
+        // TAXI-BUCHUNGS-WORKFLOW - 3-Klick-Bestellung
+        // ============================================
+        function TaxiBuchungView({ buchungen, setBuchungen, db }) {
+            const [schritt, setSchritt] = useState(1); // 1=Von, 2=Nach, 3=Details, 4=Bestätigt
+            const [abholung, setAbholung] = useState('');
+            const [abholungCustom, setAbholungCustom] = useState('');
+            const [ziel, setZiel] = useState('');
+            const [zielCustom, setZielCustom] = useState('');
+            const [kundenName, setKundenName] = useState('');
+            const [kundenTelefon, setKundenTelefon] = useState('');
+            const [zeitpunkt, setZeitpunkt] = useState('sofort');
+            const [customZeit, setCustomZeit] = useState('');
+            const [customDatum, setCustomDatum] = useState(new Date().toISOString().split('T')[0]);
+            const [fahrzeugTyp, setFahrzeugTyp] = useState('standard');
+            const [bemerkung, setBemerkung] = useState('');
+            const [letzteBestellung, setLetzteBestellung] = useState(null);
+            const [buchungsListe, setBuchungsListe] = useState([]);
+            const [showListe, setShowListe] = useState(false);
+            const [personenAnzahl, setPersonenAnzahl] = useState(1);
+
+            // Buchungen aus Firebase laden
+            useEffect(() => {
+                loadBuchungen();
+            }, []);
+
+            async function loadBuchungen() {
+                try {
+                    const snapshot = await db.collection('taxi_buchungen')
+                        .orderBy('erstelltAm', 'desc')
+                        .limit(50)
+                        .get();
+                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setBuchungsListe(data);
+                } catch (e) {
+                    console.warn('Taxi-Buchungen laden fehlgeschlagen:', e.message);
+                }
+            }
+
+            function getAbholText() {
+                if (abholung === 'custom') return abholungCustom;
+                const ort = BEKANNTE_ORTE.find(o => o.name === abholung);
+                return ort ? `${ort.name} (${ort.adresse})` : abholung;
+            }
+
+            function getZielText() {
+                if (ziel === 'custom') return zielCustom;
+                const ort = BEKANNTE_ORTE.find(o => o.name === ziel);
+                return ort ? `${ort.name} (${ort.adresse})` : ziel;
+            }
+
+            function istNacht() {
+                if (zeitpunkt === 'sofort') {
+                    const h = new Date().getHours();
+                    return h >= 22 || h < 6;
+                }
+                if (customZeit) {
+                    const h = parseInt(customZeit.split(':')[0]);
+                    return h >= 22 || h < 6;
+                }
+                return false;
+            }
+
+            function berechnePreis() {
+                let preis = TAXI_PREISE.grundpreis;
+                // Schätzung: ca. 10km pro Fahrt als Basis
+                preis += 10 * TAXI_PREISE.kmPreis;
+                if (istNacht()) preis += TAXI_PREISE.nachtzuschlag;
+                if (fahrzeugTyp === 'grossraum') preis += TAXI_PREISE.grossraumzuschlag;
+                return preis;
+            }
+
+            async function buchungAbschicken() {
+                const buchung = {
+                    abholung: getAbholText(),
+                    ziel: getZielText(),
+                    kundenName: kundenName || 'Gast',
+                    kundenTelefon: kundenTelefon || '-',
+                    zeitpunkt: zeitpunkt === 'sofort' ? 'Sofort' : `${customDatum} ${customZeit}`,
+                    fahrzeugTyp,
+                    personenAnzahl,
+                    bemerkung,
+                    status: 'neu',
+                    geschaetzterPreis: berechnePreis().toFixed(2),
+                    erstelltAm: new Date().toISOString(),
+                };
+
+                try {
+                    const docRef = await db.collection('taxi_buchungen').add(buchung);
+                    buchung.id = docRef.id;
+                    setLetzteBestellung(buchung);
+                    setSchritt(4);
+                    await loadBuchungen();
+                } catch (e) {
+                    console.error('Buchung fehlgeschlagen:', e);
+                    alert('Buchung konnte nicht gespeichert werden: ' + e.message);
+                }
+            }
+
+            function neueBuchung() {
+                setSchritt(1);
+                setAbholung('');
+                setAbholungCustom('');
+                setZiel('');
+                setZielCustom('');
+                setKundenName('');
+                setKundenTelefon('');
+                setZeitpunkt('sofort');
+                setCustomZeit('');
+                setCustomDatum(new Date().toISOString().split('T')[0]);
+                setFahrzeugTyp('standard');
+                setBemerkung('');
+                setPersonenAnzahl(1);
+                setLetzteBestellung(null);
+            }
+
+            async function updateBuchungStatus(id, neuerStatus) {
+                try {
+                    await db.collection('taxi_buchungen').doc(id).update({ status: neuerStatus });
+                    await loadBuchungen();
+                } catch (e) {
+                    console.error('Status-Update fehlgeschlagen:', e);
+                }
+            }
+
+            // Schnellauswahl-Grid für Orte
+            function OrtAuswahl({ value, setValue, customValue, setCustomValue, label }) {
+                return (
+                    <div>
+                        <h3 className="text-xl font-bold text-gray-800 mb-4">{label}</h3>
+
+                        {/* Schnellauswahl-Buttons */}
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+                            {BEKANNTE_ORTE.map(ort => (
+                                <button
+                                    key={ort.name}
+                                    onClick={() => { setValue(ort.name); setCustomValue(''); }}
+                                    className={`p-4 rounded-lg border-2 text-left transition-all hover:shadow-md ${
+                                        value === ort.name
+                                            ? 'border-blue-500 bg-blue-50 shadow-md'
+                                            : 'border-gray-200 hover:border-blue-300'
+                                    }`}
+                                >
+                                    <span className="text-2xl">{ort.icon}</span>
+                                    <div className="font-semibold text-sm mt-1">{ort.name}</div>
+                                    <div className="text-xs text-gray-500 truncate">{ort.adresse}</div>
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Custom-Eingabe */}
+                        <div className="mt-4">
+                            <div className="relative">
+                                <input
+                                    type="text"
+                                    placeholder="Oder andere Adresse eingeben..."
+                                    value={value === 'custom' ? customValue : ''}
+                                    onChange={(e) => {
+                                        setValue('custom');
+                                        setCustomValue(e.target.value);
+                                    }}
+                                    onFocus={() => { if (value !== 'custom') { setValue('custom'); } }}
+                                    className="w-full p-4 text-lg border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                                />
+                                <span className="absolute right-4 top-4 text-2xl">📍</span>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+
+            // Status-Badge
+            function StatusBadge({ status }) {
+                const farben = {
+                    'neu': 'bg-yellow-100 text-yellow-800',
+                    'angenommen': 'bg-blue-100 text-blue-800',
+                    'unterwegs': 'bg-purple-100 text-purple-800',
+                    'abgeschlossen': 'bg-green-100 text-green-800',
+                    'storniert': 'bg-red-100 text-red-800',
+                };
+                return (
+                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${farben[status] || 'bg-gray-100'}`}>
+                        {status.charAt(0).toUpperCase() + status.slice(1)}
+                    </span>
+                );
+            }
+
+            return (
+                <div className="space-y-6">
+                    {/* Header mit Toggle */}
+                    <div className="flex justify-between items-center">
+                        <h2 className="text-3xl font-bold text-gray-800">Taxi-Buchung</h2>
+                        <div className="flex gap-3">
+                            <button
+                                onClick={() => setShowListe(false)}
+                                className={`px-4 py-2 rounded-lg font-medium ${!showListe ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+                            >
+                                + Neue Buchung
+                            </button>
+                            <button
+                                onClick={() => setShowListe(true)}
+                                className={`px-4 py-2 rounded-lg font-medium ${showListe ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}`}
+                            >
+                                Buchungen ({buchungsListe.length})
+                            </button>
+                        </div>
+                    </div>
+
+                    {showListe ? (
+                        /* BUCHUNGSLISTE */
+                        <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+                            <table className="w-full">
+                                <thead className="bg-gray-50">
+                                    <tr>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Zeit</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Kunde</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Von</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Nach</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Status</th>
+                                        <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Aktionen</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-200">
+                                    {buchungsListe.map(b => (
+                                        <tr key={b.id} className="hover:bg-gray-50">
+                                            <td className="px-4 py-3 text-sm">
+                                                <div className="font-medium">{b.zeitpunkt}</div>
+                                                <div className="text-xs text-gray-500">{new Date(b.erstelltAm).toLocaleString('de-DE')}</div>
+                                            </td>
+                                            <td className="px-4 py-3 text-sm">
+                                                <div className="font-medium">{b.kundenName}</div>
+                                                <div className="text-xs text-gray-500">{b.kundenTelefon}</div>
+                                            </td>
+                                            <td className="px-4 py-3 text-sm truncate max-w-xs">{b.abholung}</td>
+                                            <td className="px-4 py-3 text-sm truncate max-w-xs">{b.ziel}</td>
+                                            <td className="px-4 py-3"><StatusBadge status={b.status} /></td>
+                                            <td className="px-4 py-3">
+                                                <div className="flex gap-1">
+                                                    {b.status === 'neu' && (
+                                                        <button onClick={() => updateBuchungStatus(b.id, 'angenommen')}
+                                                            className="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">
+                                                            Annehmen
+                                                        </button>
+                                                    )}
+                                                    {b.status === 'angenommen' && (
+                                                        <button onClick={() => updateBuchungStatus(b.id, 'unterwegs')}
+                                                            className="px-2 py-1 bg-purple-500 text-white text-xs rounded hover:bg-purple-600">
+                                                            Unterwegs
+                                                        </button>
+                                                    )}
+                                                    {b.status === 'unterwegs' && (
+                                                        <button onClick={() => updateBuchungStatus(b.id, 'abgeschlossen')}
+                                                            className="px-2 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">
+                                                            Erledigt
+                                                        </button>
+                                                    )}
+                                                    {(b.status === 'neu' || b.status === 'angenommen') && (
+                                                        <button onClick={() => updateBuchungStatus(b.id, 'storniert')}
+                                                            className="px-2 py-1 bg-red-100 text-red-700 text-xs rounded hover:bg-red-200">
+                                                            Storno
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {buchungsListe.length === 0 && (
+                                        <tr>
+                                            <td colSpan="6" className="px-4 py-8 text-center text-gray-500">
+                                                Noch keine Buchungen vorhanden
+                                            </td>
+                                        </tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    ) : (
+                        /* BUCHUNGS-WIZARD */
+                        <div>
+                            {/* Fortschrittsanzeige */}
+                            <div className="bg-white rounded-xl shadow-lg p-6 mb-6">
+                                <div className="flex items-center justify-between mb-2">
+                                    {[
+                                        { nr: 1, label: 'Abholung' },
+                                        { nr: 2, label: 'Ziel' },
+                                        { nr: 3, label: 'Details' },
+                                        { nr: 4, label: 'Fertig' },
+                                    ].map((s, i) => (
+                                        <React.Fragment key={s.nr}>
+                                            <div className="flex flex-col items-center">
+                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg ${
+                                                    schritt >= s.nr
+                                                        ? 'bg-blue-600 text-white'
+                                                        : 'bg-gray-200 text-gray-500'
+                                                }`}>
+                                                    {schritt > s.nr ? '✓' : s.nr}
+                                                </div>
+                                                <span className="text-xs mt-1 text-gray-600">{s.label}</span>
+                                            </div>
+                                            {i < 3 && (
+                                                <div className={`flex-1 h-1 mx-2 rounded ${
+                                                    schritt > s.nr ? 'bg-blue-600' : 'bg-gray-200'
+                                                }`}></div>
+                                            )}
+                                        </React.Fragment>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* SCHRITT 1: Abholung */}
+                            {schritt === 1 && (
+                                <div className="bg-white rounded-xl shadow-lg p-6">
+                                    <OrtAuswahl
+                                        value={abholung}
+                                        setValue={setAbholung}
+                                        customValue={abholungCustom}
+                                        setCustomValue={setAbholungCustom}
+                                        label="Wo sollen wir Sie abholen?"
+                                    />
+                                    <div className="mt-6 flex justify-end">
+                                        <button
+                                            onClick={() => setSchritt(2)}
+                                            disabled={!abholung || (abholung === 'custom' && !abholungCustom)}
+                                            className={`px-8 py-3 rounded-lg text-lg font-semibold transition-all ${
+                                                abholung && (abholung !== 'custom' || abholungCustom)
+                                                    ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'
+                                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                            }`}
+                                        >
+                                            Weiter →
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* SCHRITT 2: Ziel */}
+                            {schritt === 2 && (
+                                <div className="bg-white rounded-xl shadow-lg p-6">
+                                    <OrtAuswahl
+                                        value={ziel}
+                                        setValue={setZiel}
+                                        customValue={zielCustom}
+                                        setCustomValue={setZielCustom}
+                                        label="Wohin möchten Sie fahren?"
+                                    />
+                                    <div className="mt-6 flex justify-between">
+                                        <button
+                                            onClick={() => setSchritt(1)}
+                                            className="px-6 py-3 rounded-lg text-gray-600 hover:bg-gray-100"
+                                        >
+                                            ← Zurück
+                                        </button>
+                                        <button
+                                            onClick={() => setSchritt(3)}
+                                            disabled={!ziel || (ziel === 'custom' && !zielCustom)}
+                                            className={`px-8 py-3 rounded-lg text-lg font-semibold transition-all ${
+                                                ziel && (ziel !== 'custom' || zielCustom)
+                                                    ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg'
+                                                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                                            }`}
+                                        >
+                                            Weiter →
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* SCHRITT 3: Details & Bestätigung */}
+                            {schritt === 3 && (
+                                <div className="bg-white rounded-xl shadow-lg p-6">
+                                    <h3 className="text-xl font-bold text-gray-800 mb-4">Fahrt-Details</h3>
+
+                                    {/* Zusammenfassung Route */}
+                                    <div className="bg-blue-50 rounded-lg p-4 mb-6">
+                                        <div className="flex items-center gap-3">
+                                            <div className="text-center">
+                                                <div className="w-4 h-4 bg-green-500 rounded-full mx-auto"></div>
+                                                <div className="w-0.5 h-8 bg-gray-300 mx-auto"></div>
+                                                <div className="w-4 h-4 bg-red-500 rounded-full mx-auto"></div>
+                                            </div>
+                                            <div className="flex-1">
+                                                <div className="font-semibold text-green-700 mb-3">{getAbholText()}</div>
+                                                <div className="font-semibold text-red-700">{getZielText()}</div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                                        {/* Kundenname */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Name (optional)</label>
+                                            <input
+                                                type="text"
+                                                value={kundenName}
+                                                onChange={(e) => setKundenName(e.target.value)}
+                                                placeholder="Ihr Name"
+                                                className="w-full p-3 border rounded-lg"
+                                            />
+                                        </div>
+
+                                        {/* Telefon */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Telefon (optional)</label>
+                                            <input
+                                                type="tel"
+                                                value={kundenTelefon}
+                                                onChange={(e) => setKundenTelefon(e.target.value)}
+                                                placeholder="Rückrufnummer"
+                                                className="w-full p-3 border rounded-lg"
+                                            />
+                                        </div>
+
+                                        {/* Zeitpunkt */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Wann?</label>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => setZeitpunkt('sofort')}
+                                                    className={`flex-1 py-3 rounded-lg font-semibold transition-all ${
+                                                        zeitpunkt === 'sofort'
+                                                            ? 'bg-green-600 text-white'
+                                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                    }`}
+                                                >
+                                                    Sofort
+                                                </button>
+                                                <button
+                                                    onClick={() => setZeitpunkt('spaeter')}
+                                                    className={`flex-1 py-3 rounded-lg font-semibold transition-all ${
+                                                        zeitpunkt === 'spaeter'
+                                                            ? 'bg-blue-600 text-white'
+                                                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                                                    }`}
+                                                >
+                                                    Vorbestellen
+                                                </button>
+                                            </div>
+                                            {zeitpunkt === 'spaeter' && (
+                                                <div className="flex gap-2 mt-2">
+                                                    <input
+                                                        type="date"
+                                                        value={customDatum}
+                                                        onChange={(e) => setCustomDatum(e.target.value)}
+                                                        className="flex-1 p-2 border rounded-lg"
+                                                    />
+                                                    <input
+                                                        type="time"
+                                                        value={customZeit}
+                                                        onChange={(e) => setCustomZeit(e.target.value)}
+                                                        className="flex-1 p-2 border rounded-lg"
+                                                    />
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Fahrzeugtyp */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Fahrzeug</label>
+                                            <div className="flex gap-2">
+                                                <button
+                                                    onClick={() => setFahrzeugTyp('standard')}
+                                                    className={`flex-1 py-3 rounded-lg text-center transition-all ${
+                                                        fahrzeugTyp === 'standard'
+                                                            ? 'bg-blue-600 text-white'
+                                                            : 'bg-gray-100 hover:bg-gray-200'
+                                                    }`}
+                                                >
+                                                    <div className="text-2xl">🚗</div>
+                                                    <div className="text-xs font-medium">Standard</div>
+                                                    <div className="text-xs">1-4 Pers.</div>
+                                                </button>
+                                                <button
+                                                    onClick={() => setFahrzeugTyp('grossraum')}
+                                                    className={`flex-1 py-3 rounded-lg text-center transition-all ${
+                                                        fahrzeugTyp === 'grossraum'
+                                                            ? 'bg-blue-600 text-white'
+                                                            : 'bg-gray-100 hover:bg-gray-200'
+                                                    }`}
+                                                >
+                                                    <div className="text-2xl">🚐</div>
+                                                    <div className="text-xs font-medium">Großraum</div>
+                                                    <div className="text-xs">5-8 Pers.</div>
+                                                </button>
+                                            </div>
+                                        </div>
+
+                                        {/* Personenanzahl */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Personen</label>
+                                            <div className="flex items-center gap-3">
+                                                <button
+                                                    onClick={() => setPersonenAnzahl(Math.max(1, personenAnzahl - 1))}
+                                                    className="w-10 h-10 rounded-full bg-gray-200 text-xl font-bold hover:bg-gray-300"
+                                                >-</button>
+                                                <span className="text-2xl font-bold w-8 text-center">{personenAnzahl}</span>
+                                                <button
+                                                    onClick={() => setPersonenAnzahl(Math.min(8, personenAnzahl + 1))}
+                                                    className="w-10 h-10 rounded-full bg-gray-200 text-xl font-bold hover:bg-gray-300"
+                                                >+</button>
+                                            </div>
+                                        </div>
+
+                                        {/* Bemerkung */}
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Bemerkung (optional)</label>
+                                            <input
+                                                type="text"
+                                                value={bemerkung}
+                                                onChange={(e) => setBemerkung(e.target.value)}
+                                                placeholder="z.B. Kindersitz, Gepäck..."
+                                                className="w-full p-3 border rounded-lg"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Preisschätzung */}
+                                    <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
+                                        <div className="flex justify-between items-center">
+                                            <span className="text-gray-700">Geschätzter Preis:</span>
+                                            <span className="text-2xl font-bold text-gray-800">ca. {berechnePreis().toFixed(2)} €</span>
+                                        </div>
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            Grundpreis {TAXI_PREISE.grundpreis.toFixed(2)} € + {TAXI_PREISE.kmPreis.toFixed(2)} €/km
+                                            {istNacht() && ` + ${TAXI_PREISE.nachtzuschlag.toFixed(2)} € Nachtzuschlag`}
+                                            {fahrzeugTyp === 'grossraum' && ` + ${TAXI_PREISE.grossraumzuschlag.toFixed(2)} € Großraumzuschlag`}
+                                        </p>
+                                    </div>
+
+                                    {/* Buttons */}
+                                    <div className="flex justify-between">
+                                        <button
+                                            onClick={() => setSchritt(2)}
+                                            className="px-6 py-3 rounded-lg text-gray-600 hover:bg-gray-100"
+                                        >
+                                            ← Zurück
+                                        </button>
+                                        <button
+                                            onClick={buchungAbschicken}
+                                            className="px-10 py-4 rounded-lg text-xl font-bold bg-green-600 text-white hover:bg-green-700 shadow-lg transition-all hover:scale-105"
+                                        >
+                                            Taxi bestellen!
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* SCHRITT 4: Bestätigung */}
+                            {schritt === 4 && letzteBestellung && (
+                                <div className="bg-white rounded-xl shadow-lg p-8 text-center">
+                                    <div className="text-6xl mb-4">✅</div>
+                                    <h3 className="text-2xl font-bold text-green-700 mb-2">Taxi bestellt!</h3>
+                                    <p className="text-gray-600 mb-6">Ihre Buchung wurde erfolgreich aufgenommen.</p>
+
+                                    <div className="bg-gray-50 rounded-lg p-6 max-w-md mx-auto text-left mb-6">
+                                        <div className="space-y-2 text-sm">
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-500">Abholung:</span>
+                                                <span className="font-medium">{letzteBestellung.abholung}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-500">Ziel:</span>
+                                                <span className="font-medium">{letzteBestellung.ziel}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-500">Wann:</span>
+                                                <span className="font-medium">{letzteBestellung.zeitpunkt}</span>
+                                            </div>
+                                            <div className="flex justify-between">
+                                                <span className="text-gray-500">Fahrzeug:</span>
+                                                <span className="font-medium">{letzteBestellung.fahrzeugTyp === 'grossraum' ? 'Großraum' : 'Standard'}</span>
+                                            </div>
+                                            <hr className="my-2" />
+                                            <div className="flex justify-between text-lg font-bold">
+                                                <span>Preis ca.:</span>
+                                                <span>{letzteBestellung.geschaetzterPreis} €</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-4 justify-center">
+                                        <button
+                                            onClick={neueBuchung}
+                                            className="px-8 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700"
+                                        >
+                                            Neue Buchung
+                                        </button>
+                                        <button
+                                            onClick={() => setShowListe(true)}
+                                            className="px-8 py-3 bg-gray-200 text-gray-700 rounded-lg font-semibold hover:bg-gray-300"
+                                        >
+                                            Alle Buchungen
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
             );
         }
